@@ -28,7 +28,9 @@ In ChimeraX:
 devel install /my/path/to/chimerax-residue-notes
 ```
 
-Then in ChimeraX, type resnotes, and the tool should appear. I've included an example cif file with some notes so you can see how it works.
+Then in ChimeraX, type resnotes, and the tool should appear. I've included an example cif file with some notes so you can see how it works:
+
+![example screenshot](./example_resnotes.png)
 
 ## Caveats
 
