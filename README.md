@@ -13,11 +13,10 @@ Current scope:
 - export the current note set as a plain Markdown table
 
 Notes:
-- this bundle stores notes in the same on-disk format as Coot:
+- this bundle stores notes in the same on-disk format as coot1_trimmings:
   - `_cootnote_residue_note.author_b64`
   - `_cootnote_residue_note.note_b64`
-- `author` and `note` are Base64-encoded UTF-8 text for robust round-tripping
-- the mmCIF reader/writer is intentionally focused on the custom note loop and patches the text file directly
+- `author` and `note` are Base64-encoded UTF-8 text.
 
 ## Install
 Download the bundle (whole `chimerax-residue-notes` folder), then:
