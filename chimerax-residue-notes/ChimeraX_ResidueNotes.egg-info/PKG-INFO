@@ -1,0 +1,35 @@
+Metadata-Version: 2.4
+Name: ChimeraX-ResidueNotes
+Version: 0.1.0
+Summary: Read, browse, edit, and export Coot residue annotations embedded in mmCIF files.
+Author: Oliver Clarke
+Classifier: Framework :: ChimeraX
+Classifier: Intended Audience :: Science/Research
+Classifier: Programming Language :: Python :: 3
+Classifier: Topic :: Scientific/Engineering :: Visualization
+Classifier: Topic :: Scientific/Engineering :: Chemistry
+Classifier: Topic :: Scientific/Engineering :: Bio-Informatics
+Classifier: Environment :: MacOS X :: Aqua
+Classifier: Environment :: Win32 (MS Windows)
+Classifier: Environment :: X11 Applications
+Classifier: Operating System :: MacOS :: MacOS X
+Classifier: Operating System :: Microsoft :: Windows :: Windows 10
+Classifier: Operating System :: POSIX :: Linux
+Classifier: ChimeraX :: Bundle :: General :: 1,1 :: chimerax.residue_notes ::  :: 
+Classifier: ChimeraX :: Tool :: Residue Notes :: General :: Browse residue annotations embedded in mmCIF files
+Classifier: ChimeraX :: Command :: resnotes :: General :: Open the Residue Notes tool
+Classifier: ChimeraX :: Command :: resnotes import :: General :: Import residue notes from an mmCIF file
+Classifier: ChimeraX :: Command :: resnotes export :: General :: Export an annotated mmCIF file
+Classifier: ChimeraX :: Command :: resnotes export-markdown :: General :: Export residue notes as a Markdown table
+Classifier: ChimeraX :: Command :: resnotes refresh :: General :: Refresh the Residue Notes tool state
+Requires-Python: >=3.7
+Dynamic: author
+Dynamic: classifier
+Dynamic: description
+Dynamic: requires-python
+Dynamic: summary
+
+A first-pass ChimeraX bundle for reading and writing the custom
+    _cootnote_residue_note.* mmCIF loop written by coot_trimmings.
+    It provides a simple residue-notes tool window with residue navigation
+    and explicit import/export of annotated mmCIF files.
