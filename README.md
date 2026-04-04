@@ -28,13 +28,14 @@ In ChimeraX:
 devel install /my/path/to/chimerax-residue-notes
 ```
 
-Then in ChimeraX, type resnotes, and the tool should appear. I've included an example cif file with some notes so you can see how it works:
+Then in ChimeraX, type `resnotes`, and the tool should appear. I've included an example cif file with some notes so you can see how it works:
 
 ![example screenshot](./example_resnotes.png)
 
+There is also a separate tool part of this bundle, `nearby_notes`, which will show notes attached to residues within 6Å of the center of rotation.
+
 ## Caveats
 
-- This is still a lightweight bundle and would benefit from broader testing on larger models and more varied mmCIF sources.
-- The note loop parser assumes the Coot-written schema and simple token values for the custom loop rows.
+- Testing limited to a few models so far - let me know if you encounter any bugs!
 - Export is explicit via the tool; it does not attempt to modify ChimeraX's default save behavior.
 - Prototype generated with the assistance of the Codex LLM.
