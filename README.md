@@ -3,17 +3,17 @@
 Prototype ChimeraX bundle for reading and writing custom
 `_cootnote_residue_note.*` [mmCIF annotations written by `coot1-trimmings`](https://github.com/olibclarke/coot1-trimmings/).
 
-Current scope:
-- open a `Residue Notes` tool window
-- auto-import embedded notes from an mmCIF source file when possible
+Current functionality:
+- open a `Residue Notes` (or `Nearby Notes`) tool window
+- auto-import embedded notes from an mmCIF file when possible
 - browse annotated residues and jump to them in ChimeraX
 - add, edit, and delete notes
 - follow the current single selected residue, or fall back to the residue closest to CoFR
-- export an annotated mmCIF by saving the current model as mmCIF and then patching in the note loop
+- export an annotated mmCIF and/or
 - export the current note set as a plain Markdown table
 
 Notes:
-- this bundle stores notes in the same on-disk format as coot1_trimmings:
+- this bundle stores notes in the same on-disk base 64 format as coot1_trimmings:
   - `_cootnote_residue_note.author_b64`
   - `_cootnote_residue_note.note_b64`
   - `_cootnote_residue_note.title_b64`
