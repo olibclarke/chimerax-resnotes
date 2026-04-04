@@ -1,7 +1,7 @@
 # ChimeraX Residue Notes
 
 Prototype ChimeraX bundle for reading and writing custom
-`_cootnote_residue_note.*` mmCIF annotations written by `coot1_trimmings`.
+`_cootnote_residue_note.*` [mmCIF annotations written by `coot1-trimmings`](https://github.com/olibclarke/coot1-trimmings/.
 
 Current scope:
 - open a `Residue Notes` tool window
