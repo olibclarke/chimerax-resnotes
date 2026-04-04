@@ -16,6 +16,7 @@ Notes:
 - this bundle stores notes in the same on-disk format as coot1_trimmings:
   - `_cootnote_residue_note.author_b64`
   - `_cootnote_residue_note.note_b64`
+  - `_cootnote_residue_note.title_b64`
 - `author` and `note` are Base64-encoded UTF-8 text.
 
 ## Install
