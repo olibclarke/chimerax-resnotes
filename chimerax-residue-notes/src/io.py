@@ -12,6 +12,7 @@ ROW_TAGS = [
     "auth_seq_id",
     "pdbx_PDB_ins_code",
     "label_comp_id",
+    "title_b64",
     "author_b64",
     "modified_utc",
     "note_b64",
@@ -65,6 +66,7 @@ def normalize_entry(raw_entry, fallback_id=None):
         "auth_seq_id": auth_seq_id,
         "pdbx_PDB_ins_code": text_or_empty(raw_entry.get("pdbx_PDB_ins_code")).strip(),
         "label_comp_id": text_or_empty(raw_entry.get("label_comp_id")).strip() or "?",
+        "title": text_or_empty(raw_entry.get("title")).strip(),
         "author": text_or_empty(raw_entry.get("author")).strip() or default_author(),
         "modified_utc": text_or_empty(raw_entry.get("modified_utc")).strip() or now_utc(),
         "note": note_text,
@@ -150,6 +152,7 @@ def read_annotations(path):
                 "auth_seq_id": row_map.get(CATEGORY_PREFIX + "auth_seq_id"),
                 "pdbx_PDB_ins_code": row_map.get(CATEGORY_PREFIX + "pdbx_PDB_ins_code"),
                 "label_comp_id": row_map.get(CATEGORY_PREFIX + "label_comp_id"),
+                "title": decode_text(row_map.get(CATEGORY_PREFIX + "title_b64")),
                 "author": decode_text(row_map.get(CATEGORY_PREFIX + "author_b64")),
                 "modified_utc": row_map.get(CATEGORY_PREFIX + "modified_utc"),
                 "note": decode_text(row_map.get(CATEGORY_PREFIX + "note_b64")),
@@ -176,12 +179,13 @@ def _annotation_loop_text(entries):
     rows = []
     for entry in sorted(entries, key=lambda item: (item.get("auth_asym_id", ""), item.get("auth_seq_id", 0), item.get("id", 0))):
         rows.append(
-            "{0} {1} {2} {3} {4} {5} {6} {7}".format(
+            "{0} {1} {2} {3} {4} {5} {6} {7} {8}".format(
                 text_or_empty(entry.get("id")) or "?",
                 text_or_empty(entry.get("auth_asym_id")) or "?",
                 text_or_empty(entry.get("auth_seq_id")) or "?",
                 text_or_empty(entry.get("pdbx_PDB_ins_code")) or "?",
                 text_or_empty(entry.get("label_comp_id")) or "?",
+                encode_text(entry.get("title")),
                 encode_text(entry.get("author")),
                 text_or_empty(entry.get("modified_utc")) or "?",
                 encode_text(entry.get("note")),
@@ -238,13 +242,14 @@ def _markdown_residue_label(entry):
 
 def markdown_table_text(entries):
     lines = [
-        "| Residue | Author | Timestamp | Note |",
-        "| --- | --- | --- | --- |",
+        "| Residue | Title | Author | Timestamp | Note |",
+        "| --- | --- | --- | --- | --- |",
     ]
     for entry in sorted(entries, key=lambda item: (item.get("auth_asym_id", ""), item.get("auth_seq_id", 0), item.get("pdbx_PDB_ins_code", ""), item.get("id", 0))):
         lines.append(
-            "| {0} | {1} | {2} | {3} |".format(
+            "| {0} | {1} | {2} | {3} | {4} |".format(
                 _markdown_cell(_markdown_residue_label(entry)),
+                _markdown_cell(entry.get("title")) or "",
                 _markdown_cell(entry.get("author")) or "Unknown",
                 _markdown_cell(entry.get("modified_utc")) or "",
                 _markdown_cell(entry.get("note")) or "",

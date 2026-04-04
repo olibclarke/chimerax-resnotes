@@ -1,14 +1,22 @@
+import html
 from dataclasses import dataclass
 
 from Qt.QtCore import Qt
 from Qt.QtWidgets import (
     QComboBox,
+    QDialog,
+    QDialogButtonBox,
+    QFormLayout,
+    QFrame,
     QHBoxLayout,
     QLabel,
+    QLineEdit,
     QListWidget,
     QPlainTextEdit,
     QPushButton,
+    QScrollArea,
     QSplitter,
+    QToolButton,
     QVBoxLayout,
     QWidget,
 )
@@ -30,9 +38,141 @@ class ResidueNotesWidgets:
     edit_button: QPushButton
     delete_button: QPushButton
     thread_list: QListWidget
-    detail_text: QPlainTextEdit
+    detail_scroll: QScrollArea
+    detail_container: QWidget
+    detail_layout: QVBoxLayout
+    expand_all_button: QPushButton
+    collapse_all_button: QPushButton
     prev_button: QPushButton
     next_button: QPushButton
+
+
+class NoteEditDialog(QDialog):
+    def __init__(self, parent=None, *, initial_title="", initial_author="", initial_note=""):
+        super().__init__(parent)
+        self.setWindowTitle("Residue Note")
+        self.resize(560, 420)
+
+        root = QVBoxLayout()
+        root.setContentsMargins(10, 10, 10, 10)
+        root.setSpacing(8)
+        self.setLayout(root)
+
+        form = QFormLayout()
+        form.setSpacing(8)
+        root.addLayout(form)
+
+        self.title_edit = QLineEdit(initial_title)
+        self.title_edit.setPlaceholderText("Optional short title")
+        form.addRow("Title:", self.title_edit)
+
+        self.author_edit = QLineEdit(initial_author)
+        form.addRow("Author:", self.author_edit)
+
+        self.note_edit = QPlainTextEdit()
+        self.note_edit.setPlainText(initial_note)
+        self.note_edit.setMinimumHeight(220)
+        form.addRow("Note:", self.note_edit)
+
+        buttons = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
+        buttons.accepted.connect(self.accept)
+        buttons.rejected.connect(self.reject)
+        root.addWidget(buttons)
+
+        self.note_edit.setFocus()
+
+    def values(self):
+        return (
+            self.title_edit.text(),
+            self.author_edit.text(),
+            self.note_edit.toPlainText(),
+        )
+
+
+def prompt_for_note_fields(parent=None, *, initial_title="", initial_author="", initial_note=""):
+    dialog = NoteEditDialog(
+        parent,
+        initial_title=initial_title,
+        initial_author=initial_author,
+        initial_note=initial_note,
+    )
+    exec_method = getattr(dialog, "exec", None) or getattr(dialog, "exec_", None)
+    if exec_method is None or exec_method() != QDialog.Accepted:
+        return None
+    return dialog.values()
+
+
+class CollapsibleNoteCard(QFrame):
+    def __init__(
+        self,
+        header_text,
+        *,
+        author_text="Unknown",
+        timestamp_text="Unknown",
+        note_text="",
+        expanded=False,
+        toggled_callback=None,
+        parent=None,
+    ):
+        super().__init__(parent)
+        self._toggled_callback = toggled_callback
+        self.setFrameShape(QFrame.StyledPanel)
+        self.setObjectName("noteCard")
+        self.setStyleSheet(
+            "#noteCard { border: 1px solid palette(mid); border-radius: 4px; }"
+        )
+
+        root = QVBoxLayout()
+        root.setContentsMargins(6, 6, 6, 6)
+        root.setSpacing(6)
+        self.setLayout(root)
+
+        self.toggle_button = QToolButton(self)
+        self.toggle_button.setCheckable(True)
+        self.toggle_button.setChecked(expanded)
+        self.toggle_button.setToolButtonStyle(Qt.ToolButtonTextBesideIcon)
+        self.toggle_button.setText(header_text)
+        self.toggle_button.setStyleSheet("font-weight: 600; text-align: left;")
+        self.toggle_button.toggled.connect(self._on_toggled)
+        root.addWidget(self.toggle_button)
+
+        self.body_widget = QWidget(self)
+        body_layout = QVBoxLayout()
+        body_layout.setContentsMargins(8, 0, 4, 2)
+        body_layout.setSpacing(4)
+        self.body_widget.setLayout(body_layout)
+        root.addWidget(self.body_widget)
+
+        author_label = QLabel(f"<b>Author:</b> {html.escape(author_text or 'Unknown')}")
+        author_label.setTextFormat(Qt.RichText)
+        author_label.setTextInteractionFlags(Qt.TextSelectableByMouse | Qt.TextSelectableByKeyboard)
+        body_layout.addWidget(author_label)
+
+        timestamp_label = QLabel(f"<b>Timestamp:</b> {html.escape(timestamp_text or 'Unknown')}")
+        timestamp_label.setTextFormat(Qt.RichText)
+        timestamp_label.setTextInteractionFlags(Qt.TextSelectableByMouse | Qt.TextSelectableByKeyboard)
+        body_layout.addWidget(timestamp_label)
+
+        note_label = QLabel(self._note_html(note_text))
+        note_label.setTextFormat(Qt.RichText)
+        note_label.setWordWrap(True)
+        note_label.setTextInteractionFlags(Qt.TextSelectableByMouse | Qt.TextSelectableByKeyboard)
+        body_layout.addWidget(note_label)
+
+        self._on_toggled(expanded)
+
+    @staticmethod
+    def _note_html(note_text):
+        text = (note_text or "").rstrip()
+        if not text:
+            return "<i>(empty)</i>"
+        return html.escape(text).replace("\n", "<br>")
+
+    def _on_toggled(self, checked):
+        self.body_widget.setVisible(bool(checked))
+        self.toggle_button.setArrowType(Qt.DownArrow if checked else Qt.RightArrow)
+        if self._toggled_callback is not None:
+            self._toggled_callback(bool(checked))
 
 
 def build_residue_notes_ui(parent, callbacks):
@@ -92,7 +232,7 @@ def build_residue_notes_ui(parent, callbacks):
     thread_list = QListWidget()
     thread_list.setAlternatingRowColors(True)
     thread_list.setUniformItemSizes(True)
-    thread_list.setMinimumWidth(280)
+    thread_list.setMinimumWidth(180)
     thread_list.currentRowChanged.connect(callbacks["thread_changed"])
     thread_list.itemClicked.connect(callbacks["thread_clicked"])
 
@@ -106,19 +246,34 @@ def build_residue_notes_ui(parent, callbacks):
     thread_layout.addWidget(thread_label)
     thread_layout.addWidget(thread_list, 1)
 
-    detail_text = QPlainTextEdit()
-    detail_text.setReadOnly(True)
-    detail_text.setMinimumWidth(440)
-    detail_text.setLineWrapMode(QPlainTextEdit.WidgetWidth)
-    detail_label = QLabel("Notes")
-    detail_label.setStyleSheet("font-weight: 600;")
-    detail_panel = QWidget()
+    detail_scroll = QScrollArea()
+    detail_scroll.setWidgetResizable(True)
+    detail_scroll.setMinimumWidth(240)
+    detail_container = QWidget()
     detail_layout = QVBoxLayout()
     detail_layout.setContentsMargins(0, 0, 0, 0)
-    detail_layout.setSpacing(4)
-    detail_panel.setLayout(detail_layout)
-    detail_layout.addWidget(detail_label)
-    detail_layout.addWidget(detail_text, 1)
+    detail_layout.setSpacing(8)
+    detail_container.setLayout(detail_layout)
+    detail_scroll.setWidget(detail_container)
+    detail_label = QLabel("Notes")
+    detail_label.setStyleSheet("font-weight: 600;")
+    detail_header_row = QHBoxLayout()
+    detail_header_row.setSpacing(6)
+    detail_header_row.addWidget(detail_label)
+    detail_header_row.addStretch(1)
+    expand_all_button = QPushButton("Expand all")
+    expand_all_button.clicked.connect(callbacks["expand_all_notes"])
+    detail_header_row.addWidget(expand_all_button)
+    collapse_all_button = QPushButton("Collapse all")
+    collapse_all_button.clicked.connect(callbacks["collapse_all_notes"])
+    detail_header_row.addWidget(collapse_all_button)
+    detail_panel = QWidget()
+    detail_panel_layout = QVBoxLayout()
+    detail_panel_layout.setContentsMargins(0, 0, 0, 0)
+    detail_panel_layout.setSpacing(4)
+    detail_panel.setLayout(detail_panel_layout)
+    detail_panel_layout.addLayout(detail_header_row)
+    detail_panel_layout.addWidget(detail_scroll, 1)
 
     body_splitter = QSplitter(Qt.Horizontal)
     body_splitter.addWidget(thread_panel)
@@ -126,6 +281,7 @@ def build_residue_notes_ui(parent, callbacks):
     body_splitter.setStretchFactor(0, 0)
     body_splitter.setStretchFactor(1, 1)
     body_splitter.setChildrenCollapsible(False)
+    body_splitter.setSizes([220, 320])
     root.addWidget(body_splitter, 1)
 
     nav_row = QHBoxLayout()
@@ -156,7 +312,11 @@ def build_residue_notes_ui(parent, callbacks):
         edit_button=edit_button,
         delete_button=delete_button,
         thread_list=thread_list,
-        detail_text=detail_text,
+        detail_scroll=detail_scroll,
+        detail_container=detail_container,
+        detail_layout=detail_container.layout(),
+        expand_all_button=expand_all_button,
+        collapse_all_button=collapse_all_button,
         prev_button=prev_button,
         next_button=next_button,
     )

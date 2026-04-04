@@ -60,40 +60,27 @@ def next_note_id(entries):
     return max([int(entry.get("id", 0)) for entry in entries] + [0]) + 1
 
 
+def explicit_entry_title(entry):
+    return (entry.get("title") or "").strip()
+
+
+def entry_display_title(entry, fallback_from_note=True, max_length=None):
+    title = explicit_entry_title(entry)
+    if not title and fallback_from_note:
+        note_lines = [line.strip() for line in (entry.get("note") or "").splitlines() if line.strip()]
+        if note_lines:
+            title = note_lines[0]
+    if not title:
+        title = "Untitled note"
+    if max_length is not None and len(title) > max_length:
+        title = title[: max_length - 1].rstrip() + "..."
+    return title
+
+
 def thread_preview(thread, max_preview=56):
     note_count = len(thread.entries)
-    preview = thread.entries[-1]["note"].splitlines()[0].strip()
-    if len(preview) > max_preview:
-        preview = preview[: max_preview - 1].rstrip() + "..."
+    preview = entry_display_title(thread.entries[-1], fallback_from_note=True, max_length=max_preview)
     suffix = "note" if note_count == 1 else "notes"
     if preview:
         return f"{thread.label} ({note_count} {suffix}) - {preview}"
     return f"{thread.label} ({note_count} {suffix})"
-
-
-def _note_body_lines(note_text):
-    lines = (note_text or "").splitlines()
-    if not lines:
-        return ["(empty)"]
-    return lines
-
-
-def thread_detail_text(thread):
-    note_count = len(thread.entries)
-    lines = [
-        thread.label,
-        f"{note_count} note{'s' if note_count != 1 else ''}",
-        "=" * 48,
-        "",
-    ]
-    for index, entry in enumerate(thread.entries, start=1):
-        lines.append(f"Note {index} of {note_count}")
-        lines.append(f"Author:    {entry.get('author') or 'Unknown'}")
-        lines.append(f"Timestamp: {entry.get('modified_utc') or 'Unknown'}")
-        lines.append("")
-        lines.append("Text:")
-        for body_line in _note_body_lines(entry.get("note")):
-            lines.append(f"  {body_line}")
-        if index != len(thread.entries):
-            lines.extend(["", "-" * 40, ""])
-    return "\n".join(lines)

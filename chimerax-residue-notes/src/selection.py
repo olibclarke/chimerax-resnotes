@@ -77,6 +77,25 @@ def residue_center_xyz(residue):
     return None
 
 
+def distance_sq(xyz_a, xyz_b):
+    if xyz_a is None or xyz_b is None:
+        return None
+    dx = xyz_a[0] - xyz_b[0]
+    dy = xyz_a[1] - xyz_b[1]
+    dz = xyz_a[2] - xyz_b[2]
+    return dx * dx + dy * dy + dz * dz
+
+
+def find_residue_by_note_key(model, key):
+    if model is None or key is None:
+        return None
+    chain_id, resno, ins_code = key[:3]
+    for residue in safe_model_residues(model):
+        if residue.chain_id == chain_id and residue.number == resno and (residue.insertion_code or "") == (ins_code or ""):
+            return residue
+    return None
+
+
 def closest_residue_to_xyz(model, xyz):
     if model is None or xyz is None:
         return None
@@ -84,13 +103,10 @@ def closest_residue_to_xyz(model, xyz):
     best_distance_sq = None
     for residue in safe_model_residues(model):
         residue_xyz = residue_center_xyz(residue)
-        if residue_xyz is None:
+        residue_distance_sq = distance_sq(residue_xyz, xyz)
+        if residue_distance_sq is None:
             continue
-        dx = residue_xyz[0] - xyz[0]
-        dy = residue_xyz[1] - xyz[1]
-        dz = residue_xyz[2] - xyz[2]
-        distance_sq = dx * dx + dy * dy + dz * dz
-        if best_distance_sq is None or distance_sq < best_distance_sq:
-            best_distance_sq = distance_sq
+        if best_distance_sq is None or residue_distance_sq < best_distance_sq:
+            best_distance_sq = residue_distance_sq
             best_residue = residue
     return best_residue

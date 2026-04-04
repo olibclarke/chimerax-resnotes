@@ -8,14 +8,17 @@
     A first-pass ChimeraX bundle for reading and writing the custom
     _cootnote_residue_note.* mmCIF loop written by coot_trimmings.
     It provides a simple residue-notes tool window with residue navigation
-    and explicit import/export of annotated mmCIF files.
+    and explicit import/export of annotated mmCIF files, plus a read-only
+    nearby-notes pane that follows the center of rotation.
   </Description>
   <Categories>
     <Category name="General"/>
   </Categories>
   <Classifiers>
     <ChimeraXClassifier>Tool :: Residue Notes :: General :: Browse residue annotations embedded in mmCIF files</ChimeraXClassifier>
+    <ChimeraXClassifier>Tool :: Nearby Notes :: General :: Read nearby residue annotations around the center of rotation</ChimeraXClassifier>
     <ChimeraXClassifier>Command :: resnotes :: General :: Open the Residue Notes tool</ChimeraXClassifier>
+    <ChimeraXClassifier>Command :: nearby_notes :: General :: Open the Nearby Notes tool</ChimeraXClassifier>
     <ChimeraXClassifier>Command :: resnotes import :: General :: Import residue notes from an mmCIF file</ChimeraXClassifier>
     <ChimeraXClassifier>Command :: resnotes export :: General :: Export an annotated mmCIF file</ChimeraXClassifier>
     <ChimeraXClassifier>Command :: resnotes export-markdown :: General :: Export residue notes as a Markdown table</ChimeraXClassifier>

@@ -2,6 +2,7 @@ from chimerax.atomic import AtomicStructure
 from chimerax.core.commands import BoolArg, CmdDesc, ModelArg, OpenFileNameArg, SaveFileNameArg, register
 from chimerax.core.errors import UserError
 
+from .nearby_tool import show_nearby_notes_tool
 from .tool import show_residue_notes_tool
 
 
@@ -17,8 +18,23 @@ def _validated_model(model):
     return model
 
 
+def _nearby_tool(session):
+    return show_nearby_notes_tool(session)
+
+
 def resnotes(session):
     return _tool(session)
+
+
+def nearby_notes(session, model=None):
+    tool = _nearby_tool(session)
+    target_model = _validated_model(model)
+    if target_model is not None:
+        try:
+            tool.focus_model(target_model)
+        except Exception as error:
+            raise UserError(f"Failed to focus Nearby Notes on model {target_model!r}: {error}") from error
+    return tool
 
 
 def resnotes_import(session, file_name, model=None):
@@ -110,3 +126,19 @@ def register_resnotes_command(command_name, logger):
     register(f"{command_name} export", export_desc, resnotes_export, logger=logger)
     register(f"{command_name} export-markdown", export_markdown_desc, resnotes_export_markdown, logger=logger)
     register(f"{command_name} refresh", refresh_desc, resnotes_refresh, logger=logger)
+
+
+def register_nearby_notes_command(command_name, logger):
+    nearby_desc = CmdDesc(
+        optional=[("model", ModelArg)],
+        synopsis="Open the Nearby Notes tool",
+    )
+    register(command_name, nearby_desc, nearby_notes, logger=logger)
+
+
+def register_bundle_command(command_name, logger):
+    if command_name == "resnotes":
+        register_resnotes_command(command_name, logger)
+        return
+    if command_name == "nearby_notes":
+        register_nearby_notes_command(command_name, logger)

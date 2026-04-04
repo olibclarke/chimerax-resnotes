@@ -17,7 +17,9 @@ Classifier: Operating System :: Microsoft :: Windows :: Windows 10
 Classifier: Operating System :: POSIX :: Linux
 Classifier: ChimeraX :: Bundle :: General :: 1,1 :: chimerax.residue_notes ::  :: 
 Classifier: ChimeraX :: Tool :: Residue Notes :: General :: Browse residue annotations embedded in mmCIF files
+Classifier: ChimeraX :: Tool :: Nearby Notes :: General :: Read nearby residue annotations around the center of rotation
 Classifier: ChimeraX :: Command :: resnotes :: General :: Open the Residue Notes tool
+Classifier: ChimeraX :: Command :: nearby_notes :: General :: Open the Nearby Notes tool
 Classifier: ChimeraX :: Command :: resnotes import :: General :: Import residue notes from an mmCIF file
 Classifier: ChimeraX :: Command :: resnotes export :: General :: Export an annotated mmCIF file
 Classifier: ChimeraX :: Command :: resnotes export-markdown :: General :: Export residue notes as a Markdown table
@@ -32,4 +34,5 @@ Dynamic: summary
 A first-pass ChimeraX bundle for reading and writing the custom
     _cootnote_residue_note.* mmCIF loop written by coot_trimmings.
     It provides a simple residue-notes tool window with residue navigation
-    and explicit import/export of annotated mmCIF files.
+    and explicit import/export of annotated mmCIF files, plus a read-only
+    nearby-notes pane that follows the center of rotation.

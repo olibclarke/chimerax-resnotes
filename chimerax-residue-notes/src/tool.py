@@ -1,7 +1,7 @@
 import json
 import os
 
-from Qt.QtWidgets import QFileDialog, QInputDialog, QMessageBox
+from Qt.QtWidgets import QFileDialog, QInputDialog, QLabel, QMessageBox
 
 from chimerax.atomic import AtomicStructure, get_triggers as atomic_triggers
 from chimerax.core.commands import run
@@ -12,8 +12,8 @@ from chimerax.ui import MainToolWindow
 
 from .io import default_author, normalize_entry, now_utc, read_annotations, write_annotations, write_markdown_table
 from .selection import closest_residue_to_xyz, cofr_key, single_selected_residue, safe_model_residues, selected_residues_for_model
-from .state import ModelNoteState, group_threads, next_note_id, note_thread_key, thread_detail_text, thread_key_for_residue, thread_preview
-from .ui import build_residue_notes_ui
+from .state import ModelNoteState, entry_display_title, group_threads, next_note_id, note_thread_key, thread_key_for_residue, thread_preview
+from .ui import CollapsibleNoteCard, build_residue_notes_ui, prompt_for_note_fields
 
 
 def show_residue_notes_tool(session):
@@ -35,6 +35,8 @@ class ResidueNotesTool(ToolInstance):
         self._last_selection_signature = None
         self._last_io_dir = ""
         self._session_author = default_author()
+        self._expanded_note_ids_by_thread = {}
+        self._suppress_thread_navigation = False
 
         self.tool_window = MainToolWindow(self)
         self._build_ui()
@@ -69,6 +71,8 @@ class ResidueNotesTool(ToolInstance):
                 "thread_clicked": self._on_thread_clicked,
                 "previous_thread": self._goto_previous_thread,
                 "next_thread": self._goto_next_thread,
+                "expand_all_notes": self._expand_all_current_notes,
+                "collapse_all_notes": self._collapse_all_current_notes,
             },
         )
         self.model_combo = self.widgets.model_combo
@@ -84,7 +88,11 @@ class ResidueNotesTool(ToolInstance):
         self.edit_button = self.widgets.edit_button
         self.delete_button = self.widgets.delete_button
         self.thread_list = self.widgets.thread_list
-        self.detail_text = self.widgets.detail_text
+        self.detail_scroll = self.widgets.detail_scroll
+        self.detail_container = self.widgets.detail_container
+        self.detail_layout = self.widgets.detail_layout
+        self.expand_all_button = self.widgets.expand_all_button
+        self.collapse_all_button = self.widgets.collapse_all_button
         self.prev_button = self.widgets.prev_button
         self.next_button = self.widgets.next_button
         self._building_ui = False
@@ -166,6 +174,9 @@ class ResidueNotesTool(ToolInstance):
         stale_models = [model for model in self._model_state if model not in live_models]
         for model in stale_models:
             self._model_state.pop(model, None)
+        stale_thread_keys = [key for key in self._expanded_note_ids_by_thread if key[0] not in live_models]
+        for key in stale_thread_keys:
+            self._expanded_note_ids_by_thread.pop(key, None)
 
     def _update_source_label(self):
         model = self._current_model()
@@ -336,6 +347,8 @@ class ResidueNotesTool(ToolInstance):
         self.add_button.setEnabled(has_model and residue is not None)
         self.edit_button.setEnabled(thread is not None)
         self.delete_button.setEnabled(thread is not None)
+        self.expand_all_button.setEnabled(thread is not None)
+        self.collapse_all_button.setEnabled(thread is not None)
         self.prev_button.setEnabled(has_threads)
         self.next_button.setEnabled(has_threads)
         if can_import_embedded:
@@ -346,7 +359,51 @@ class ResidueNotesTool(ToolInstance):
             self.import_auto_button.setToolTip("No atomic model selected")
 
     def _set_empty_detail_text(self, message):
-        self.detail_text.setPlainText(message)
+        self._clear_detail_layout()
+        label = QLabel(message)
+        label.setWordWrap(True)
+        label.setStyleSheet("color: palette(mid); padding: 8px;")
+        self.detail_layout.addWidget(label)
+        self.detail_layout.addStretch(1)
+
+    def _clear_detail_layout(self):
+        while self.detail_layout.count():
+            item = self.detail_layout.takeAt(0)
+            widget = item.widget()
+            if widget is not None:
+                widget.deleteLater()
+            child_layout = item.layout()
+            if child_layout is not None:
+                while child_layout.count():
+                    child_item = child_layout.takeAt(0)
+                    child_widget = child_item.widget()
+                    if child_widget is not None:
+                        child_widget.deleteLater()
+
+    def _thread_state_key(self, thread):
+        model = self._current_model()
+        if model is None or thread is None:
+            return None
+        return (model, thread.key)
+
+    def _expanded_note_ids_for_thread(self, thread):
+        state_key = self._thread_state_key(thread)
+        if state_key is None:
+            return set()
+        expanded_ids = self._expanded_note_ids_by_thread.get(state_key)
+        if expanded_ids is None:
+            return {thread.entries[-1].get("id")} if thread.entries else set()
+        return set(expanded_ids)
+
+    def _set_note_expanded(self, thread, entry_id, expanded):
+        state_key = self._thread_state_key(thread)
+        if state_key is None:
+            return
+        expanded_ids = self._expanded_note_ids_by_thread.setdefault(state_key, set())
+        if expanded:
+            expanded_ids.add(entry_id)
+        else:
+            expanded_ids.discard(entry_id)
 
     def _can_import_embedded_for_model(self, model):
         if model is None:
@@ -391,7 +448,7 @@ class ResidueNotesTool(ToolInstance):
         self._refresh_target_state(force=True, sync_thread=True)
         self._set_status(f"Ready for {self._model_label(model)}")
 
-    def _set_current_thread_row(self, row, *, reactivate_if_same=False):
+    def _set_current_thread_row(self, row, *, reactivate_if_same=False, navigate=True):
         if row is None or row < 0 or row >= len(self._thread_rows):
             return
         current_row = self.thread_list.currentRow()
@@ -400,9 +457,11 @@ class ResidueNotesTool(ToolInstance):
             if current_item is not None:
                 self.thread_list.scrollToItem(current_item)
             if reactivate_if_same:
-                self._activate_current_thread()
+                self._activate_current_thread(navigate=navigate)
             return
+        self._suppress_thread_navigation = not navigate
         self.thread_list.setCurrentRow(row)
+        self._suppress_thread_navigation = False
         current_item = self.thread_list.currentItem()
         if current_item is not None:
             self.thread_list.scrollToItem(current_item)
@@ -434,7 +493,7 @@ class ResidueNotesTool(ToolInstance):
                     selected_row = min(current_row, len(self._thread_rows) - 1)
                 else:
                     selected_row = 0
-            self._set_current_thread_row(selected_row)
+            self._set_current_thread_row(selected_row, navigate=False)
         else:
             self._set_empty_detail_text("No annotated residues in the current model.")
         self._update_button_states()
@@ -470,7 +529,7 @@ class ResidueNotesTool(ToolInstance):
         row = self._thread_index_for_residue(residue)
         if row is None or row == self.thread_list.currentRow():
             return
-        self._set_current_thread_row(row)
+        self._set_current_thread_row(row, navigate=False)
 
     def _find_residue(self, model, key):
         chain_id, resno, ins_code, _comp_id = key
@@ -509,23 +568,73 @@ class ResidueNotesTool(ToolInstance):
             return
         self._goto_residue_with_context(residue)
 
-    def _activate_current_thread(self):
+    def _activate_current_thread(self, *, navigate=True):
         thread = self._current_thread()
         if thread is None:
             self._set_empty_detail_text("Select an annotated residue to view notes.")
             self._update_button_states()
             return
-        self.detail_text.setPlainText(thread_detail_text(thread))
+        self._render_thread_detail(thread)
         self._update_button_states()
-        self._goto_thread(thread)
+        if navigate:
+            self._goto_thread(thread)
+
+    def _set_all_notes_expanded(self, expanded):
+        thread = self._current_thread()
+        if thread is None:
+            return
+        state_key = self._thread_state_key(thread)
+        if state_key is None:
+            return
+        if expanded:
+            self._expanded_note_ids_by_thread[state_key] = {entry.get("id") for entry in thread.entries}
+        else:
+            self._expanded_note_ids_by_thread[state_key] = set()
+        self._render_thread_detail(thread)
+
+    def _expand_all_current_notes(self):
+        self._set_all_notes_expanded(True)
+
+    def _collapse_all_current_notes(self):
+        self._set_all_notes_expanded(False)
+
+    def _render_thread_detail(self, thread):
+        self._clear_detail_layout()
+
+        header_label = QLabel(thread.label)
+        header_label.setStyleSheet("font-weight: 700; font-size: 15px;")
+        self.detail_layout.addWidget(header_label)
+
+        subtitle_label = QLabel(f"{len(thread.entries)} note{'s' if len(thread.entries) != 1 else ''}")
+        subtitle_label.setStyleSheet("color: palette(dark);")
+        self.detail_layout.addWidget(subtitle_label)
+
+        expanded_ids = self._expanded_note_ids_for_thread(thread)
+        note_count = len(thread.entries)
+        for index, entry in enumerate(thread.entries, start=1):
+            title_text = entry_display_title(entry, fallback_from_note=True, max_length=96)
+            card = CollapsibleNoteCard(
+                f"Note {index} of {note_count} - {title_text}",
+                author_text=entry.get("author") or "Unknown",
+                timestamp_text=entry.get("modified_utc") or "Unknown",
+                note_text=entry.get("note") or "",
+                expanded=entry.get("id") in expanded_ids,
+                toggled_callback=lambda checked, eid=entry.get("id"), current_thread=thread: self._set_note_expanded(current_thread, eid, checked),
+            )
+            self.detail_layout.addWidget(card)
+
+        self.detail_layout.addStretch(1)
+        scrollbar = self.detail_scroll.verticalScrollBar()
+        if scrollbar is not None:
+            scrollbar.setValue(0)
 
     def _on_thread_changed(self, row):
         self._update_active_residue_label()
-        self._activate_current_thread()
+        self._activate_current_thread(navigate=not self._suppress_thread_navigation)
 
     def _on_thread_clicked(self, *_args):
         self._update_active_residue_label()
-        self._activate_current_thread()
+        self._activate_current_thread(navigate=True)
 
     def _goto_previous_thread(self):
         if not self._thread_rows:
@@ -537,9 +646,9 @@ class ResidueNotesTool(ToolInstance):
         else:
             row -= 1
         if row == current_row:
-            self._activate_current_thread()
+            self._activate_current_thread(navigate=True)
         else:
-            self._set_current_thread_row(row)
+            self._set_current_thread_row(row, navigate=True)
 
     def _goto_next_thread(self):
         if not self._thread_rows:
@@ -551,9 +660,9 @@ class ResidueNotesTool(ToolInstance):
         else:
             row += 1
         if row == current_row:
-            self._activate_current_thread()
+            self._activate_current_thread(navigate=True)
         else:
-            self._set_current_thread_row(row)
+            self._set_current_thread_row(row, navigate=True)
 
     def _selected_residue_entry_template(self):
         _label_prefix, residue = self._residue_target()
@@ -571,23 +680,16 @@ class ResidueNotesTool(ToolInstance):
             "label_comp_id": residue.name or "?",
         }
 
-    def _prompt_for_note(self, initial_author="", initial_note=""):
-        author, author_ok = QInputDialog.getText(
+    def _prompt_for_note(self, initial_title="", initial_author="", initial_note=""):
+        prompted = prompt_for_note_fields(
             self.tool_window.ui_area,
-            "Residue Notes",
-            "Author:",
-            text=initial_author or self._session_author,
+            initial_title=initial_title,
+            initial_author=initial_author or self._session_author,
+            initial_note=initial_note,
         )
-        if not author_ok:
+        if prompted is None:
             return None
-        note, note_ok = QInputDialog.getMultiLineText(
-            self.tool_window.ui_area,
-            "Residue Notes",
-            "Note:",
-            initial_note,
-        )
-        if not note_ok:
-            return None
+        title, author, note = prompted
         normalized = normalize_entry(
             {
                 "id": 1,
@@ -595,6 +697,7 @@ class ResidueNotesTool(ToolInstance):
                 "auth_seq_id": 1,
                 "pdbx_PDB_ins_code": "",
                 "label_comp_id": "UNK",
+                "title": title,
                 "author": author,
                 "modified_utc": now_utc(),
                 "note": note,
@@ -605,7 +708,7 @@ class ResidueNotesTool(ToolInstance):
             QMessageBox.information(self.tool_window.ui_area, "Residue Notes", "Please enter a non-empty note.")
             return None
         self._session_author = normalized["author"]
-        return normalized["author"], normalized["note"]
+        return normalized["title"], normalized["author"], normalized["note"]
 
     def _add_note_for_selected_residue(self):
         model = self._current_model()
@@ -615,7 +718,7 @@ class ResidueNotesTool(ToolInstance):
         prompted = self._prompt_for_note()
         if prompted is None:
             return
-        author, note = prompted
+        title, author, note = prompted
         new_entry = normalize_entry(
             {
                 "id": next_note_id(self._state_for_model(model).entries),
@@ -623,6 +726,7 @@ class ResidueNotesTool(ToolInstance):
                 "auth_seq_id": template["auth_seq_id"],
                 "pdbx_PDB_ins_code": template["pdbx_PDB_ins_code"],
                 "label_comp_id": template["label_comp_id"],
+                "title": title,
                 "author": author,
                 "modified_utc": now_utc(),
                 "note": note,
@@ -647,7 +751,12 @@ class ResidueNotesTool(ToolInstance):
         if len(thread.entries) == 1:
             return thread.entries[0]
         labels = [
-            f"Note {index + 1} - {entry.get('author') or 'Unknown'} - {entry.get('modified_utc') or 'Unknown'}"
+            "Note {0} - {1} - {2} - {3}".format(
+                index + 1,
+                entry_display_title(entry, fallback_from_note=True, max_length=40),
+                entry.get("author") or "Unknown",
+                entry.get("modified_utc") or "Unknown",
+            )
             for index, entry in enumerate(thread.entries)
         ]
         chosen, ok = QInputDialog.getItem(
@@ -670,10 +779,11 @@ class ResidueNotesTool(ToolInstance):
         entry = self._choose_note_entry(thread, "Edit Note")
         if entry is None:
             return
-        prompted = self._prompt_for_note(entry.get("author", ""), entry.get("note", ""))
+        prompted = self._prompt_for_note(entry.get("title", ""), entry.get("author", ""), entry.get("note", ""))
         if prompted is None:
             return
-        author, note = prompted
+        title, author, note = prompted
+        entry["title"] = title
         entry["author"] = author
         entry["note"] = note
         entry["modified_utc"] = now_utc()

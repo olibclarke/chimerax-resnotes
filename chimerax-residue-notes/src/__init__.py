@@ -6,15 +6,19 @@ class _ResidueNotesBundleAPI(BundleAPI):
 
     @staticmethod
     def start_tool(session, bi, ti):
+        if ti.name == "Nearby Notes":
+            from .nearby_tool import NearbyNotesTool
+
+            return NearbyNotesTool(session, ti.name)
         from .tool import ResidueNotesTool
 
         return ResidueNotesTool(session, ti.name)
 
     @staticmethod
     def register_command(bi, ci, logger):
-        from .cmd import register_resnotes_command
+        from .cmd import register_bundle_command
 
-        register_resnotes_command(ci.name, logger)
+        register_bundle_command(ci.name, logger)
 
 
 bundle_api = _ResidueNotesBundleAPI()

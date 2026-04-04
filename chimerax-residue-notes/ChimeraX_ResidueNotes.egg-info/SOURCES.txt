@@ -6,6 +6,7 @@ ChimeraX_ResidueNotes.egg-info/top_level.txt
 src/__init__.py
 src/cmd.py
 src/io.py
+src/nearby_tool.py
 src/selection.py
 src/state.py
 src/tool.py
