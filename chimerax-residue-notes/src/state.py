@@ -15,23 +15,58 @@ class ResidueNoteThread:
     entries: list
 
 
+def _text_or_empty(value):
+    if value in (None, ".", "?"):
+        return ""
+    return str(value)
+
+
+def _safe_int(value, default=None):
+    try:
+        return int(_text_or_empty(value).strip())
+    except Exception:
+        return default
+
+
+def _normalized_label_seq_id(value):
+    return _text_or_empty(value).strip()
+
+
+def _canonical_identifier_key(
+    label_asym_id,
+    label_seq_id,
+    auth_asym_id,
+    auth_seq_id,
+    pdbx_pdb_ins_code,
+    label_comp_id,
+):
+    return (
+        _text_or_empty(label_asym_id).strip(),
+        _normalized_label_seq_id(label_seq_id),
+        _text_or_empty(auth_asym_id).strip(),
+        _safe_int(auth_seq_id, default=None),
+        _text_or_empty(pdbx_pdb_ins_code).strip(),
+        _text_or_empty(label_comp_id).strip() or "?",
+    )
+
+
 def note_thread_key(entry):
-    return (
-        entry["auth_asym_id"],
-        int(entry["auth_seq_id"]),
-        entry.get("pdbx_PDB_ins_code", ""),
-        entry.get("label_comp_id", ""),
+    return _canonical_identifier_key(
+        entry.get("label_asym_id"),
+        entry.get("label_seq_id"),
+        entry.get("auth_asym_id"),
+        entry.get("auth_seq_id"),
+        entry.get("pdbx_PDB_ins_code"),
+        entry.get("label_comp_id"),
     )
 
 
-def thread_key_for_residue(residue):
-    if residue is None:
-        return None
-    return (
-        residue.chain_id,
-        int(residue.number),
-        residue.insertion_code or "",
-    )
+def _residue_label_from_entry(entry):
+    chain_id = _text_or_empty(entry.get("auth_asym_id")) or _text_or_empty(entry.get("label_asym_id")) or "?"
+    seq_id = _text_or_empty(entry.get("auth_seq_id")) or _text_or_empty(entry.get("label_seq_id")) or "?"
+    ins_code = _text_or_empty(entry.get("pdbx_PDB_ins_code"))
+    comp_id = _text_or_empty(entry.get("label_comp_id")) or "?"
+    return f"{chain_id}:{seq_id}{ins_code} {comp_id}"
 
 
 def group_threads(entries):
@@ -44,15 +79,22 @@ def group_threads(entries):
             thread_entries,
             key=lambda item: (item.get("modified_utc", ""), item.get("id", 0)),
         )
-        chain_id, resno, ins_code, comp_id = key
         threads.append(
             ResidueNoteThread(
                 key=key,
-                label=f"{chain_id}:{resno}{ins_code or ''} {comp_id}",
+                label=_residue_label_from_entry(sorted_entries[0]),
                 entries=sorted_entries,
             )
         )
-    threads.sort(key=lambda item: (item.key[0], item.key[1], item.key[2], item.entries[-1]["id"]))
+    threads.sort(
+        key=lambda item: (
+            item.key[2] or item.key[0],
+            item.key[3] if item.key[3] is not None else float("inf"),
+            item.key[4],
+            item.key[5],
+            item.entries[-1]["id"],
+        )
+    )
     return threads
 
 

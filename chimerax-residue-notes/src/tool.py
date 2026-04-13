@@ -11,8 +11,16 @@ from chimerax.core.tools import ToolInstance, get_singleton
 from chimerax.ui import MainToolWindow
 
 from .io import default_author, normalize_entry, now_utc, read_annotations, write_annotations, write_markdown_table
-from .selection import closest_residue_to_xyz, cofr_key, single_selected_residue, safe_model_residues, selected_residues_for_model
-from .state import ModelNoteState, entry_display_title, group_threads, next_note_id, note_thread_key, thread_key_for_residue, thread_preview
+from .selection import (
+    annotation_entry_matches_residue,
+    closest_residue_to_xyz,
+    cofr_key,
+    find_residue_for_annotation,
+    residue_identifier_fields,
+    selected_residues_for_model,
+    single_selected_residue,
+)
+from .state import ModelNoteState, entry_display_title, group_threads, next_note_id, note_thread_key, thread_preview
 from .ui import CollapsibleNoteCard, build_residue_notes_ui, prompt_for_note_fields
 
 
@@ -507,16 +515,17 @@ class ResidueNotesTool(ToolInstance):
     def _thread_index_for_residue(self, residue):
         if residue is None:
             return None
-        residue_key = thread_key_for_residue(residue)
         for index, thread in enumerate(self._thread_rows):
-            if thread.key[:3] == residue_key:
+            if thread.entries and annotation_entry_matches_residue(thread.entries[0], residue):
                 return index
         return None
 
     def _preferred_thread_key(self):
         selected_residue = self._single_selected_residue()
         if selected_residue is not None:
-            return thread_key_for_residue(selected_residue)
+            row = self._thread_index_for_residue(selected_residue)
+            if row is not None:
+                return self._thread_rows[row].key
         current_thread = self._current_thread()
         if current_thread is not None:
             return current_thread.key
@@ -532,10 +541,10 @@ class ResidueNotesTool(ToolInstance):
         self._set_current_thread_row(row, navigate=False)
 
     def _find_residue(self, model, key):
-        chain_id, resno, ins_code, _comp_id = key
-        for residue in safe_model_residues(model):
-            if residue.chain_id == chain_id and residue.number == resno and (residue.insertion_code or "") == (ins_code or ""):
-                return residue
+        for thread in self._thread_rows:
+            if thread.key != key or not thread.entries:
+                continue
+            return find_residue_for_annotation(model, thread.entries[0])
         return None
 
     def _goto_residue_with_context(self, residue):
@@ -673,12 +682,7 @@ class ResidueNotesTool(ToolInstance):
                 "Select a single residue, or place the center of rotation near the residue you want to annotate.",
             )
             return None
-        return {
-            "auth_asym_id": residue.chain_id,
-            "auth_seq_id": int(residue.number),
-            "pdbx_PDB_ins_code": residue.insertion_code or "",
-            "label_comp_id": residue.name or "?",
-        }
+        return residue_identifier_fields(residue)
 
     def _prompt_for_note(self, initial_title="", initial_author="", initial_note=""):
         prompted = prompt_for_note_fields(
@@ -693,10 +697,12 @@ class ResidueNotesTool(ToolInstance):
         normalized = normalize_entry(
             {
                 "id": 1,
+                "label_comp_id": "UNK",
+                "label_asym_id": "",
+                "label_seq_id": "",
                 "auth_asym_id": "A",
                 "auth_seq_id": 1,
                 "pdbx_PDB_ins_code": "",
-                "label_comp_id": "UNK",
                 "title": title,
                 "author": author,
                 "modified_utc": now_utc(),
@@ -722,10 +728,12 @@ class ResidueNotesTool(ToolInstance):
         new_entry = normalize_entry(
             {
                 "id": next_note_id(self._state_for_model(model).entries),
+                "label_comp_id": template["label_comp_id"],
+                "label_asym_id": template["label_asym_id"],
+                "label_seq_id": template["label_seq_id"],
                 "auth_asym_id": template["auth_asym_id"],
                 "auth_seq_id": template["auth_seq_id"],
                 "pdbx_PDB_ins_code": template["pdbx_PDB_ins_code"],
-                "label_comp_id": template["label_comp_id"],
                 "title": title,
                 "author": author,
                 "modified_utc": now_utc(),

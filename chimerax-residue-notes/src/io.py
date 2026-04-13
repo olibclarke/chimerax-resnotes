@@ -8,14 +8,16 @@ from datetime import datetime, timezone
 CATEGORY_PREFIX = "_cootnote_residue_note."
 ROW_TAGS = [
     "id",
+    "label_comp_id",
+    "label_asym_id",
+    "label_seq_id",
     "auth_asym_id",
     "auth_seq_id",
     "pdbx_PDB_ins_code",
-    "label_comp_id",
-    "title_b64",
-    "author_b64",
+    "title",
+    "author",
     "modified_utc",
-    "note_b64",
+    "note",
 ]
 FULL_TAGS = [CATEGORY_PREFIX + tag for tag in ROW_TAGS]
 
@@ -34,8 +36,11 @@ def text_or_empty(value):
     return str(value)
 
 
-def encode_text(value):
-    return base64.b64encode(text_or_empty(value).encode("utf-8")).decode("ascii")
+def _safe_int(value, default=None):
+    try:
+        return int(text_or_empty(value).strip())
+    except Exception:
+        return default
 
 
 def decode_text(value):
@@ -48,24 +53,45 @@ def decode_text(value):
         return text
 
 
+def _normalized_label_seq_id(value):
+    return text_or_empty(value).strip()
+
+
+def _entry_sort_key(entry):
+    auth_seq_id = entry.get("auth_seq_id")
+    if auth_seq_id is None:
+        auth_seq_sort = float("inf")
+    else:
+        auth_seq_sort = int(auth_seq_id)
+    return (
+        text_or_empty(entry.get("auth_asym_id")) or text_or_empty(entry.get("label_asym_id")),
+        auth_seq_sort,
+        text_or_empty(entry.get("pdbx_PDB_ins_code")),
+        text_or_empty(entry.get("label_comp_id")),
+        text_or_empty(entry.get("label_seq_id")),
+        int(entry.get("id", 0)),
+    )
+
+
 def normalize_entry(raw_entry, fallback_id=None):
-    try:
-        entry_id = int(text_or_empty(raw_entry.get("id")) or fallback_id)
-        auth_asym_id = text_or_empty(raw_entry.get("auth_asym_id")).strip()
-        auth_seq_id = int(text_or_empty(raw_entry.get("auth_seq_id")).strip())
-    except Exception:
+    entry_id = _safe_int(raw_entry.get("id"), default=fallback_id)
+    if entry_id is None:
         return None
-    if not auth_asym_id:
+    auth_asym_id = text_or_empty(raw_entry.get("auth_asym_id")).strip()
+    auth_seq_id = _safe_int(raw_entry.get("auth_seq_id"), default=None)
+    if not auth_asym_id or auth_seq_id is None:
         return None
     note_text = text_or_empty(raw_entry.get("note")).strip()
     if not note_text:
         return None
     return {
-        "id": entry_id,
-        "auth_asym_id": auth_asym_id,
-        "auth_seq_id": auth_seq_id,
-        "pdbx_PDB_ins_code": text_or_empty(raw_entry.get("pdbx_PDB_ins_code")).strip(),
+        "id": int(entry_id),
         "label_comp_id": text_or_empty(raw_entry.get("label_comp_id")).strip() or "?",
+        "label_asym_id": text_or_empty(raw_entry.get("label_asym_id")).strip(),
+        "label_seq_id": _normalized_label_seq_id(raw_entry.get("label_seq_id")),
+        "auth_asym_id": auth_asym_id,
+        "auth_seq_id": int(auth_seq_id),
+        "pdbx_PDB_ins_code": text_or_empty(raw_entry.get("pdbx_PDB_ins_code")).strip(),
         "title": text_or_empty(raw_entry.get("title")).strip(),
         "author": text_or_empty(raw_entry.get("author")).strip() or default_author(),
         "modified_utc": text_or_empty(raw_entry.get("modified_utc")).strip() or now_utc(),
@@ -127,6 +153,15 @@ def _annotation_loop_bounds(lines):
     return None
 
 
+def _row_map_value(row_map, plain_tag, legacy_b64_tag=None):
+    plain_value = row_map.get(CATEGORY_PREFIX + plain_tag)
+    if plain_value not in (None, "", ".", "?"):
+        return plain_value
+    if legacy_b64_tag is not None:
+        return decode_text(row_map.get(CATEGORY_PREFIX + legacy_b64_tag))
+    return plain_value
+
+
 def read_annotations(path):
     with open(path, "r", encoding="utf-8") as handle:
         lines = handle.readlines()
@@ -148,14 +183,16 @@ def read_annotations(path):
         normalized = normalize_entry(
             {
                 "id": row_map.get(CATEGORY_PREFIX + "id"),
+                "label_comp_id": row_map.get(CATEGORY_PREFIX + "label_comp_id"),
+                "label_asym_id": row_map.get(CATEGORY_PREFIX + "label_asym_id"),
+                "label_seq_id": row_map.get(CATEGORY_PREFIX + "label_seq_id"),
                 "auth_asym_id": row_map.get(CATEGORY_PREFIX + "auth_asym_id"),
                 "auth_seq_id": row_map.get(CATEGORY_PREFIX + "auth_seq_id"),
                 "pdbx_PDB_ins_code": row_map.get(CATEGORY_PREFIX + "pdbx_PDB_ins_code"),
-                "label_comp_id": row_map.get(CATEGORY_PREFIX + "label_comp_id"),
-                "title": decode_text(row_map.get(CATEGORY_PREFIX + "title_b64")),
-                "author": decode_text(row_map.get(CATEGORY_PREFIX + "author_b64")),
+                "title": _row_map_value(row_map, "title", "title_b64"),
+                "author": _row_map_value(row_map, "author", "author_b64"),
                 "modified_utc": row_map.get(CATEGORY_PREFIX + "modified_utc"),
-                "note": decode_text(row_map.get(CATEGORY_PREFIX + "note_b64")),
+                "note": _row_map_value(row_map, "note", "note_b64"),
             },
             fallback_id=(row_index // row_width) + 1,
         )
@@ -173,29 +210,52 @@ def _strip_existing_annotation_loop(text):
     return "".join(lines[:loop_start] + lines[loop_end:])
 
 
+def _cif_token(value):
+    text = ("" if value is None else str(value)).replace("\r\n", "\n").replace("\r", "\n")
+    if text == "":
+        return "''"
+    if text in (".", "?"):
+        return text
+    if "\n" in text or text.startswith(";"):
+        return ";\n" + text + "\n;"
+    reserved = {"loop_", "stop_", "global_"}
+    if (
+        any(character.isspace() for character in text)
+        or text[0] in ("_", "#", "'", '"')
+        or text.lower().startswith("data_")
+        or text.lower().startswith("save_")
+        or text in reserved
+    ):
+        if "'" not in text:
+            return "'" + text + "'"
+        if '"' not in text:
+            return '"' + text + '"'
+        return ";\n" + text + "\n;"
+    return text
+
+
 def _annotation_loop_text(entries):
     if not entries:
         return ""
-    rows = []
-    for entry in sorted(entries, key=lambda item: (item.get("auth_asym_id", ""), item.get("auth_seq_id", 0), item.get("id", 0))):
-        rows.append(
-            "{0} {1} {2} {3} {4} {5} {6} {7} {8}".format(
-                text_or_empty(entry.get("id")) or "?",
-                text_or_empty(entry.get("auth_asym_id")) or "?",
-                text_or_empty(entry.get("auth_seq_id")) or "?",
-                text_or_empty(entry.get("pdbx_PDB_ins_code")) or "?",
-                text_or_empty(entry.get("label_comp_id")) or "?",
-                encode_text(entry.get("title")),
-                encode_text(entry.get("author")),
-                text_or_empty(entry.get("modified_utc")) or "?",
-                encode_text(entry.get("note")),
-            )
-        )
     loop_lines = ["\n#\n", "loop_\n"]
     for tag in FULL_TAGS:
         loop_lines.append(tag + "\n")
-    for row in rows:
-        loop_lines.append(row + "\n")
+    for entry in sorted(entries, key=_entry_sort_key):
+        row_values = [
+            text_or_empty(entry.get("id")) or "?",
+            text_or_empty(entry.get("label_comp_id")) or "?",
+            text_or_empty(entry.get("label_asym_id")) or "?",
+            text_or_empty(entry.get("label_seq_id")) or ".",
+            text_or_empty(entry.get("auth_asym_id")) or "?",
+            text_or_empty(entry.get("auth_seq_id")) or "?",
+            text_or_empty(entry.get("pdbx_PDB_ins_code")) or "?",
+            text_or_empty(entry.get("title")),
+            text_or_empty(entry.get("author")),
+            text_or_empty(entry.get("modified_utc")) or "?",
+            text_or_empty(entry.get("note")),
+        ]
+        for value in row_values:
+            loop_lines.append(_cif_token(value) + "\n")
     loop_lines.append("#\n")
     return "".join(loop_lines)
 
@@ -232,12 +292,11 @@ def _markdown_cell(value):
 
 
 def _markdown_residue_label(entry):
-    return "{0}:{1}{2} {3}".format(
-        text_or_empty(entry.get("auth_asym_id")) or "?",
-        text_or_empty(entry.get("auth_seq_id")) or "?",
-        text_or_empty(entry.get("pdbx_PDB_ins_code")) or "",
-        text_or_empty(entry.get("label_comp_id")) or "?",
-    )
+    chain_id = text_or_empty(entry.get("auth_asym_id")) or text_or_empty(entry.get("label_asym_id")) or "?"
+    seq_id = text_or_empty(entry.get("auth_seq_id")) or text_or_empty(entry.get("label_seq_id")) or "?"
+    ins_code = text_or_empty(entry.get("pdbx_PDB_ins_code"))
+    comp_id = text_or_empty(entry.get("label_comp_id")) or "?"
+    return f"{chain_id}:{seq_id}{ins_code} {comp_id}"
 
 
 def markdown_table_text(entries):
@@ -245,7 +304,7 @@ def markdown_table_text(entries):
         "| Residue | Title | Author | Timestamp | Note |",
         "| --- | --- | --- | --- | --- |",
     ]
-    for entry in sorted(entries, key=lambda item: (item.get("auth_asym_id", ""), item.get("auth_seq_id", 0), item.get("pdbx_PDB_ins_code", ""), item.get("id", 0))):
+    for entry in sorted(entries, key=_entry_sort_key):
         lines.append(
             "| {0} | {1} | {2} | {3} | {4} |".format(
                 _markdown_cell(_markdown_residue_label(entry)),

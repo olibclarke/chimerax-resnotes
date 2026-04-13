@@ -86,12 +86,111 @@ def distance_sq(xyz_a, xyz_b):
     return dx * dx + dy * dy + dz * dz
 
 
-def find_residue_by_note_key(model, key):
-    if model is None or key is None:
+def residue_label_asym_id(residue):
+    chain_id = getattr(residue, "mmcif_chain_id", None)
+    if isinstance(chain_id, str) and chain_id.strip():
+        return chain_id.strip()
+    return (getattr(residue, "chain_id", None) or "").strip()
+
+
+def residue_label_seq_id(residue):
+    pt_none = getattr(residue, "PT_NONE", 0)
+    if getattr(residue, "polymer_type", pt_none) == pt_none:
+        return ""
+    model = getattr(residue, "structure", None)
+    label_asym_id = residue_label_asym_id(residue)
+    if model is None or not label_asym_id:
+        return ""
+    position = 0
+    for candidate in safe_model_residues(model):
+        if getattr(candidate, "polymer_type", pt_none) == pt_none:
+            continue
+        if residue_label_asym_id(candidate) != label_asym_id:
+            continue
+        position += 1
+        if candidate is residue:
+            return str(position)
+    return ""
+
+
+def residue_identifier_fields(residue):
+    if residue is None:
         return None
-    chain_id, resno, ins_code = key[:3]
+    return {
+        "label_comp_id": getattr(residue, "name", None) or "?",
+        "label_asym_id": residue_label_asym_id(residue),
+        "label_seq_id": residue_label_seq_id(residue),
+        "auth_asym_id": getattr(residue, "chain_id", None) or "",
+        "auth_seq_id": int(getattr(residue, "number")),
+        "pdbx_PDB_ins_code": getattr(residue, "insertion_code", None) or "",
+    }
+
+
+def _entry_text(entry, key):
+    value = entry.get(key)
+    if value in (None, ".", "?"):
+        return ""
+    return str(value).strip()
+
+
+def _entry_int(entry, key):
+    try:
+        return int(_entry_text(entry, key))
+    except Exception:
+        return None
+
+
+def annotation_entry_matches_residue(entry, residue):
+    residue_fields = residue_identifier_fields(residue)
+    if residue_fields is None:
+        return False
+
+    entry_label_comp_id = _entry_text(entry, "label_comp_id") or "?"
+    residue_label_comp_id = _entry_text(residue_fields, "label_comp_id") or "?"
+    if entry_label_comp_id != residue_label_comp_id:
+        return False
+
+    entry_label_asym_id = _entry_text(entry, "label_asym_id")
+    entry_label_seq_id = _entry_text(entry, "label_seq_id")
+    residue_label_asym_id_value = _entry_text(residue_fields, "label_asym_id")
+    residue_label_seq_id_value = _entry_text(residue_fields, "label_seq_id")
+    if entry_label_asym_id and residue_label_asym_id_value:
+        if entry_label_asym_id == residue_label_asym_id_value:
+            if entry_label_seq_id or residue_label_seq_id_value:
+                if entry_label_seq_id == residue_label_seq_id_value:
+                    return True
+            else:
+                entry_auth_asym_id = _entry_text(entry, "auth_asym_id")
+                residue_auth_asym_id = _entry_text(residue_fields, "auth_asym_id")
+                entry_auth_seq_id = _entry_int(entry, "auth_seq_id")
+                residue_auth_seq_id = _entry_int(residue_fields, "auth_seq_id")
+                entry_ins_code = _entry_text(entry, "pdbx_PDB_ins_code")
+                residue_ins_code = _entry_text(residue_fields, "pdbx_PDB_ins_code")
+                if (
+                    entry_auth_asym_id == residue_auth_asym_id
+                    and entry_auth_seq_id == residue_auth_seq_id
+                    and entry_ins_code == residue_ins_code
+                ):
+                    return True
+
+    entry_auth_asym_id = _entry_text(entry, "auth_asym_id")
+    residue_auth_asym_id = _entry_text(residue_fields, "auth_asym_id")
+    entry_auth_seq_id = _entry_int(entry, "auth_seq_id")
+    residue_auth_seq_id = _entry_int(residue_fields, "auth_seq_id")
+    entry_ins_code = _entry_text(entry, "pdbx_PDB_ins_code")
+    residue_ins_code = _entry_text(residue_fields, "pdbx_PDB_ins_code")
+    return (
+        entry_auth_asym_id == residue_auth_asym_id
+        and entry_auth_seq_id == residue_auth_seq_id
+        and entry_ins_code == residue_ins_code
+    )
+
+
+def find_residue_for_annotation(model, entry):
+    if model is None or entry is None:
+        return None
     for residue in safe_model_residues(model):
-        if residue.chain_id == chain_id and residue.number == resno and (residue.insertion_code or "") == (ins_code or ""):
+        if annotation_entry_matches_residue(entry, residue):
             return residue
     return None
 

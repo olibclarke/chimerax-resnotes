@@ -21,7 +21,7 @@ from chimerax.core.tools import ToolInstance, get_singleton
 from chimerax.ui import MainToolWindow
 
 from .io import read_annotations
-from .selection import cofr_key, distance_sq, find_residue_by_note_key, residue_center_xyz, selected_residues_for_model
+from .selection import cofr_key, distance_sq, find_residue_for_annotation, residue_center_xyz, selected_residues_for_model
 from .state import ModelNoteState, entry_display_title, group_threads, thread_preview
 from .ui import CollapsibleNoteCard
 
@@ -401,7 +401,7 @@ class NearbyNotesTool(ToolInstance):
         if cofr_xyz_value is not None:
             radius_sq = radius * radius
             for thread in group_threads(state.entries):
-                residue = find_residue_by_note_key(model, thread.key)
+                residue = find_residue_for_annotation(model, thread.entries[0] if thread.entries else None)
                 if residue is None:
                     continue
                 residue_xyz = residue_center_xyz(residue)
