@@ -1,48 +1,37 @@
 # ChimeraX Residue Notes
 
-Prototype ChimeraX bundle for reading and writing custom
-`_cootnote_residue_note.*` [mmCIF annotations written by `coot1-trimmings`](https://github.com/olibclarke/coot1-trimmings/).
+Version **0.2.2** reads, browses, edits, and exports residue, region, and
+positional notes using the mmCIF annotation format shared with
+[Coot Trimmings](https://github.com/olibclarke/coot1-trimmings/).
 
-Current functionality:
-- open a `Residue Notes` (or `Nearby Notes`) tool window
-- auto-import embedded notes from an mmCIF file when possible
-- browse annotated residues and jump to them in ChimeraX
-- add, edit, and delete notes
-- follow the current single selected residue, or fall back to the residue closest to CoFR
-- export an annotated mmCIF and/or
-- export the current note set as a plain Markdown table
-
-Notes:
-- this bundle stores notes in the same UTF-8 plaintext format as coot1_trimmings:
-- `_cootnote_residue_note.id`
-- `_cootnote_residue_note.label_comp_id`
-- `_cootnote_residue_note.label_asym_id`
-- `_cootnote_residue_note.label_seq_id`
-- `_cootnote_residue_note.auth_asym_id`
-- `_cootnote_residue_note.auth_seq_id`
-- `_cootnote_residue_note.pdbx_PDB_ins_code`
-- `_cootnote_residue_note.title`
-- `_cootnote_residue_note.author`
-- `_cootnote_residue_note.modified_utc`
-- `_cootnote_residue_note.note` (contains the body of the note)
+- Create notes from selected residues or a contiguous region, with optional
+  endpoint picking and temporary graphical markers.
+- Annotate unknown densities or binding sites at the current center of rotation.
+- Browse nearby notes, navigate to regions or points, and highlight the target.
+- Export annotated mmCIF or Markdown, retaining compatibility with older notes.
 
 ## Install
-Download the bundle (whole `chimerax-residue-notes` folder), then:
-
-In ChimeraX:
+Download or clone this repository, then install the **nested bundle folder**
+from ChimeraX:
 
 ```chimerax
-devel install /my/path/to/chimerax-residue-notes
+devel install "/path/to/chimerax-resnotes/chimerax-residue-notes"
 ```
 
-Then in ChimeraX, type `resnotes`, and the tool should appear. I've included an example cif file with some notes so you can see how it works:
+Open the editor with `resnotes` or the nearby browser with `nearby_notes`.
+Export remains explicit; ordinary ChimeraX model saving is not modified.
 
-![example screenshot](./example_resnotes.png)
+See the [bundle documentation](chimerax-residue-notes/README.md) for selection,
+range picking, positional notes, file format, commands, and developer checks.
+The bundle uses ChimeraX's own APIs; no separate Gemmi installation is required
+to use it.
 
-There is also a separate tool part of this bundle, `nearby_notes`, which will show notes attached to residues within 6Å of the center of rotation.
+## Example
 
-## Caveats
+An [annotated example model](annotated_example.cif) and an earlier screenshot
+are included:
 
-- Testing limited to a few models so far - let me know if you encounter any bugs!
-- Export is explicit via the tool; it does not attempt to modify ChimeraX's default save behavior.
-- Prototype generated with the assistance of the Codex LLM.
+![Residue Notes example](example_resnotes.png)
+
+This is a lightweight working tool with limited model coverage. Please report
+issues with steps to reproduce. Developed with assistance from Codex.

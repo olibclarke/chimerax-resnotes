@@ -11,9 +11,42 @@
     <code>coot_trimmings</code>.
   </p>
   <p>
-    Notes are grouped by residue and can be navigated with the thread list or the
+    Notes are grouped by residue, single-chain region, or Cartesian position and can be navigated with the thread list or the
     previous/next buttons. Export writes an annotated mmCIF by saving the current
     model as mmCIF and then injecting the custom annotation loop.
+  </p>
+  <p>
+    Choose <b>Add note at center of rotation</b> to annotate a point without a
+    residue. This captures the existing CoFR when the editor opens, not the view
+    centre; there are no editable coordinate fields. Clicking a positional thread
+    centres it without changing zoom or orientation and shows a temporary cyan
+    sphere. The point is independent of residue edits and numbering. Coordinates
+    use the associated model's file-coordinate frame, follow rigid model
+    transforms in ChimeraX, and round-trip with Coot via the
+    <code>target_kind=position</code> and <code>position_x/y/z</code> fields.
+  </p>
+  <p>
+    Select residues and choose <b>Add note from selection</b> to annotate a
+    residue or a contiguous single-chain region directly. Disjoint selections
+    and selections spanning chains or models are not silently expanded.
+    Alternatively, <b>Choose range...</b> accepts a chain, start, and end, or
+    <b>Pick endpoints</b> lets you click the first and last
+    residues in the 3D view. Dragging still rotates; <b>Cancel picking</b> exits
+    without adding a note. Cyan and orange spheres mark the endpoints; they
+    disappear when finished or cancelled and are never exported as atoms.
+    The previous mouse binding is restored afterwards.
+    Insertion codes and numbering gaps are supported. A title alone is enough
+    for a short region label. Clicking its thread navigates to and temporarily
+    highlights the entire range in either notes pane; leaving it or closing
+    the tool clears the highlight. The centre follows the current range atoms,
+    including after model transformations or annotated mmCIF reloads.
+  </p>
+  <p>
+    The <code>nearby_notes</code> command opens a read-only browser around the
+    centre of rotation. A region is nearby when any member residue falls within
+    the selected radius. Positional notes use their point's distance from CoFR;
+    clicking one navigates to it. Both panes share edits immediately; saving annotated
+    mmCIF or Markdown remains explicit.
   </p>
 </body>
 </html>

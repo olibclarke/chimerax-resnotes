@@ -21,9 +21,11 @@ from chimerax.core.tools import ToolInstance, get_singleton
 from chimerax.ui import MainToolWindow
 
 from .io import read_annotations
-from .selection import cofr_key, distance_sq, find_residue_for_annotation, residue_center_xyz, selected_residues_for_model
-from .state import ModelNoteState, entry_display_title, group_threads, thread_preview
+from .selection import cofr_key, distance_sq, find_residues_for_annotation, residue_center_xyz, selected_residues_for_model
+from .state import model_note_state, entry_display_title, group_threads, note_thread_key, thread_preview
 from .ui import CollapsibleNoteCard
+from .positions import PositionHighlight, navigate_to_position, position_scene_xyz
+from .regions import RegionHighlight, navigate_to_region
 
 
 @dataclass
@@ -49,7 +51,12 @@ class NearbyNotesTool(ToolInstance):
         self._expanded_note_ids_by_thread = {}
         self._trigger_handlers = []
         self._last_nearby_signature = None
+        self._member_cache_signature = None
+        self._thread_members = []
         self._building_ui = False
+        self._position_highlight = PositionHighlight()
+        self._region_highlight = RegionHighlight()
+        self._position_key = None
 
         self.tool_window = MainToolWindow(self)
         self._build_ui()
@@ -58,6 +65,8 @@ class NearbyNotesTool(ToolInstance):
         self.tool_window.manage("side")
 
     def delete(self):
+        self._position_highlight.clear()
+        self._region_highlight.clear()
         for handler in getattr(self, "_trigger_handlers", []):
             try:
                 handler.remove()
@@ -97,7 +106,7 @@ class NearbyNotesTool(ToolInstance):
         self.radius_spin.setSingleStep(0.5)
         self.radius_spin.setSuffix(" A")
         self.radius_spin.setValue(6.0)
-        self.radius_spin.setToolTip("Show annotated residues whose centers are within this radius of the current CoFR")
+        self.radius_spin.setToolTip("Show notes with a member residue centre or positional point within this radius of CoFR")
         self.radius_spin.valueChanged.connect(self._radius_changed)
         filter_row.addWidget(self.radius_spin)
         filter_row.addStretch(1)
@@ -115,8 +124,9 @@ class NearbyNotesTool(ToolInstance):
         self.thread_list.setUniformItemSizes(True)
         self.thread_list.setMinimumWidth(180)
         self.thread_list.currentRowChanged.connect(self._on_thread_changed)
+        self.thread_list.itemClicked.connect(self._on_thread_clicked)
 
-        thread_label = QLabel("Nearby annotated residues")
+        thread_label = QLabel("Nearby residues / regions / positions")
         thread_label.setStyleSheet("font-weight: 600;")
         thread_panel = QWidget()
         thread_layout = QVBoxLayout()
@@ -197,7 +207,7 @@ class NearbyNotesTool(ToolInstance):
     def _state_for_model(self, model):
         state = self._model_state.get(model)
         if state is None:
-            state = ModelNoteState()
+            state = model_note_state(model)
             self._model_state[model] = state
         if state.source_path is None:
             state.source_path = self._model_source_path(model)
@@ -368,6 +378,9 @@ class NearbyNotesTool(ToolInstance):
     def _refresh_nearby_threads(self, *, force=False):
         model = self._current_model()
         if model is None:
+            self._position_highlight.clear()
+            self._region_highlight.clear()
+            self._position_key = None
             self.thread_list.clear()
             self._thread_rows = []
             self._update_source_label()
@@ -384,7 +397,10 @@ class NearbyNotesTool(ToolInstance):
 
         state = self._state_for_model(model)
         radius = float(self.radius_spin.value())
-        signature = (model, rounded_key, round(radius, 2), len(state.entries))
+        entries_signature = tuple((e.get("id"), e.get("modified_utc"), e.get("title"), e.get("note"), note_thread_key(e))
+                                  for e in state.entries)
+        transform_key = tuple(float(v) for v in model.scene_position.matrix.flat)
+        signature = (model, transform_key, rounded_key, round(radius, 2), entries_signature)
         if not force and signature == self._last_nearby_signature:
             return
         self._last_nearby_signature = signature
@@ -400,13 +416,21 @@ class NearbyNotesTool(ToolInstance):
 
         if cofr_xyz_value is not None:
             radius_sq = radius * radius
-            for thread in group_threads(state.entries):
-                residue = find_residue_for_annotation(model, thread.entries[0] if thread.entries else None)
-                if residue is None:
+            member_signature = (model, entries_signature)
+            if force or self._member_cache_signature != member_signature:
+                self._member_cache_signature = member_signature
+                self._thread_members = [(thread, find_residues_for_annotation(model, thread.entries[0]))
+                                        for thread in group_threads(state.entries) if thread.entries]
+            for thread, members in self._thread_members:
+                if thread.entries[0].get("target_kind") == "position":
+                    distances = [(distance_sq(position_scene_xyz(model, thread.entries[0]), cofr_xyz_value), None)]
+                else:
+                    distances = [(distance_sq(residue_center_xyz(r), cofr_xyz_value), r) for r in members]
+                distances = [(d, r) for d, r in distances if d is not None]
+                if not distances:
                     continue
-                residue_xyz = residue_center_xyz(residue)
-                residue_distance_sq = distance_sq(residue_xyz, cofr_xyz_value)
-                if residue_distance_sq is None or residue_distance_sq > radius_sq:
+                residue_distance_sq, residue = min(distances, key=lambda item: item[0])
+                if residue_distance_sq > radius_sq:
                     continue
                 self._thread_rows.append(
                     NearbyThreadRow(
@@ -415,7 +439,7 @@ class NearbyNotesTool(ToolInstance):
                         distance=math.sqrt(residue_distance_sq),
                     )
                 )
-            self._thread_rows.sort(key=lambda item: (item.distance, item.thread.key[0], item.thread.key[1], item.thread.key[2]))
+            self._thread_rows.sort(key=lambda item: (item.distance, item.thread.label, item.thread.entries[-1]['id']))
 
         for row in self._thread_rows:
             self.thread_list.addItem(self._thread_row_preview(row))
@@ -430,13 +454,16 @@ class NearbyNotesTool(ToolInstance):
                         break
             self._set_current_thread_row(selected_index)
             self._set_status(
-                "Showing {0} nearby annotated residue{1} within {2:.1f} A".format(
+                "Showing {0} nearby annotation{1} within {2:.1f} A".format(
                     len(self._thread_rows),
                     "" if len(self._thread_rows) == 1 else "s",
                     radius,
                 )
             )
         else:
+            self._position_highlight.clear()
+            self._region_highlight.clear()
+            self._position_key = None
             self._set_empty_detail_text(f"No nearby notes within {radius:.1f} A of CoFR.")
             self._set_status(f"No nearby notes within {radius:.1f} A of CoFR")
         self._update_detail_button_states()
@@ -504,11 +531,44 @@ class NearbyNotesTool(ToolInstance):
     def _on_model_changed(self, *_args):
         if self._building_ui:
             return
+        self._position_highlight.clear()
+        self._region_highlight.clear()
+        self._position_key = None
         self._last_nearby_signature = None
         self._refresh_nearby_threads(force=True)
 
     def _on_thread_changed(self, *_args):
+        row = self._current_thread_row()
+        if row is None or row.thread.key != self._position_key:
+            self._position_highlight.clear()
+            self._region_highlight.clear()
+            self._position_key = None
         self._render_current_thread()
+
+    def _on_thread_clicked(self, *_args):
+        row = self._current_thread_row()
+        if row is None:
+            return
+        model = self._current_model()
+        entry = row.thread.entries[0]
+        self._position_highlight.clear()
+        self._region_highlight.clear()
+        self._position_key = None
+        try:
+            if entry.get("target_kind") == "position":
+                navigate_to_position(self.session, model, entry, self._position_highlight)
+            elif entry.get("target_kind") == "region":
+                members = find_residues_for_annotation(model, entry)
+                if not members:
+                    raise ValueError("Region endpoints are missing or ambiguous in this model")
+                navigate_to_region(self.session, members, self._region_highlight)
+            else:
+                return
+            self._position_key = row.thread.key
+        except Exception as error:
+            self._position_highlight.clear()
+            self._region_highlight.clear()
+            self._set_status(f"Could not navigate to note: {error}")
 
     def _radius_changed(self, *_args):
         self._last_nearby_signature = None

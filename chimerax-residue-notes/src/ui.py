@@ -35,6 +35,8 @@ class ResidueNotesWidgets:
     export_file_button: QPushButton
     export_markdown_button: QPushButton
     add_button: QPushButton
+    add_region_button: QPushButton
+    add_position_button: QPushButton
     edit_button: QPushButton
     delete_button: QPushButton
     thread_list: QListWidget
@@ -50,7 +52,7 @@ class ResidueNotesWidgets:
 class NoteEditDialog(QDialog):
     def __init__(self, parent=None, *, initial_title="", initial_author="", initial_note=""):
         super().__init__(parent)
-        self.setWindowTitle("Residue Note")
+        self.setWindowTitle("Note")
         self.resize(560, 420)
 
         root = QVBoxLayout()
@@ -100,6 +102,34 @@ def prompt_for_note_fields(parent=None, *, initial_title="", initial_author="", 
     if exec_method is None or exec_method() != QDialog.Accepted:
         return None
     return dialog.values()
+
+
+def prompt_for_region_fields(parent=None, *, chain="", start="", end=""):
+    dialog = QDialog(parent)
+    dialog.setWindowTitle("Region note - choose range")
+    form = QFormLayout(dialog)
+    chain_edit, start_edit, end_edit = QLineEdit(chain), QLineEdit(start), QLineEdit(end)
+    start_edit.setPlaceholderText("75 or 75A")
+    end_edit.setPlaceholderText("80 or 80B")
+    form.addRow("Chain:", chain_edit)
+    form.addRow("Start residue:", start_edit)
+    form.addRow("End residue:", end_edit)
+    buttons = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
+    buttons.accepted.connect(dialog.accept)
+    buttons.rejected.connect(dialog.reject)
+    pick_button = buttons.addButton("Pick endpoints", QDialogButtonBox.ActionRole)
+    pick_button.setToolTip("Click the first and last residues in the 3D view")
+    pick_button.clicked.connect(lambda: dialog.done(2))
+    form.addRow(buttons)
+    execute = getattr(dialog, "exec", None) or getattr(dialog, "exec_", None)
+    if execute is None:
+        return None
+    result = execute()
+    if result == 2:
+        return "pick"
+    if result != QDialog.Accepted:
+        return None
+    return chain_edit.text().strip(), start_edit.text().strip(), end_edit.text().strip()
 
 
 class CollapsibleNoteCard(QFrame):
@@ -153,11 +183,12 @@ class CollapsibleNoteCard(QFrame):
         timestamp_label.setTextInteractionFlags(Qt.TextSelectableByMouse | Qt.TextSelectableByKeyboard)
         body_layout.addWidget(timestamp_label)
 
-        note_label = QLabel(self._note_html(note_text))
-        note_label.setTextFormat(Qt.RichText)
-        note_label.setWordWrap(True)
-        note_label.setTextInteractionFlags(Qt.TextSelectableByMouse | Qt.TextSelectableByKeyboard)
-        body_layout.addWidget(note_label)
+        if (note_text or "").strip():
+            note_label = QLabel(self._note_html(note_text))
+            note_label.setTextFormat(Qt.RichText)
+            note_label.setWordWrap(True)
+            note_label.setTextInteractionFlags(Qt.TextSelectableByMouse | Qt.TextSelectableByKeyboard)
+            body_layout.addWidget(note_label)
 
         self._on_toggled(expanded)
 
@@ -218,9 +249,13 @@ def build_residue_notes_ui(parent, callbacks):
 
     note_row = QHBoxLayout()
     note_row.setSpacing(8)
-    add_button = QPushButton("Add note")
+    add_button = QPushButton("Add note from selection")
+    add_button.setToolTip("Annotate a selected residue or a contiguous single-chain range")
     add_button.clicked.connect(callbacks["add_note"])
     note_row.addWidget(add_button)
+    add_region_button = QPushButton("Choose range...")
+    add_region_button.clicked.connect(callbacks["add_region_note"])
+    note_row.addWidget(add_region_button)
     edit_button = QPushButton("Edit note")
     edit_button.clicked.connect(callbacks["edit_note"])
     note_row.addWidget(edit_button)
@@ -229,6 +264,11 @@ def build_residue_notes_ui(parent, callbacks):
     note_row.addWidget(delete_button)
     root.addLayout(note_row)
 
+    add_position_button = QPushButton("Add note at center of rotation")
+    add_position_button.setToolTip("Capture the current CoFR, without moving it or selecting a residue")
+    add_position_button.clicked.connect(callbacks["add_position_note"])
+    root.addWidget(add_position_button)
+
     thread_list = QListWidget()
     thread_list.setAlternatingRowColors(True)
     thread_list.setUniformItemSizes(True)
@@ -236,7 +276,7 @@ def build_residue_notes_ui(parent, callbacks):
     thread_list.currentRowChanged.connect(callbacks["thread_changed"])
     thread_list.itemClicked.connect(callbacks["thread_clicked"])
 
-    thread_label = QLabel("Annotated residues")
+    thread_label = QLabel("Annotated residues / regions / positions")
     thread_label.setStyleSheet("font-weight: 600;")
     thread_panel = QWidget()
     thread_layout = QVBoxLayout()
@@ -309,6 +349,8 @@ def build_residue_notes_ui(parent, callbacks):
         export_file_button=export_file_button,
         export_markdown_button=export_markdown_button,
         add_button=add_button,
+        add_region_button=add_region_button,
+        add_position_button=add_position_button,
         edit_button=edit_button,
         delete_button=delete_button,
         thread_list=thread_list,

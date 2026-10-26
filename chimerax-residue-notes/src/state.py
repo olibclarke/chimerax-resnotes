@@ -1,11 +1,21 @@
 from dataclasses import dataclass, field
 
+from .positions import position_label, position_xyz
+
 
 @dataclass
 class ModelNoteState:
     entries: list = field(default_factory=list)
     source_path: str | None = None
     loaded_from_source: bool = False
+
+
+def model_note_state(model):
+    state = getattr(model, "_cootnote_model_state", None)
+    if state is None:
+        state = ModelNoteState()
+        model._cootnote_model_state = state
+    return state
 
 
 @dataclass
@@ -51,7 +61,9 @@ def _canonical_identifier_key(
 
 
 def note_thread_key(entry):
-    return _canonical_identifier_key(
+    if entry.get("target_kind") == "position":
+        return ("position", *position_xyz(entry))
+    key = _canonical_identifier_key(
         entry.get("label_asym_id"),
         entry.get("label_seq_id"),
         entry.get("auth_asym_id"),
@@ -59,14 +71,32 @@ def note_thread_key(entry):
         entry.get("pdbx_PDB_ins_code"),
         entry.get("label_comp_id"),
     )
+    if entry.get("target_kind") == "region":
+        key += _canonical_identifier_key(
+            entry.get("end_label_asym_id"), entry.get("end_label_seq_id"),
+            entry.get("end_auth_asym_id"), entry.get("end_auth_seq_id"),
+            entry.get("end_pdbx_PDB_ins_code"), entry.get("end_label_comp_id"))
+    return key
 
 
 def _residue_label_from_entry(entry):
+    if entry.get("target_kind") == "position":
+        return position_label(entry)
     chain_id = _text_or_empty(entry.get("auth_asym_id")) or _text_or_empty(entry.get("label_asym_id")) or "?"
     seq_id = _text_or_empty(entry.get("auth_seq_id")) or _text_or_empty(entry.get("label_seq_id")) or "?"
     ins_code = _text_or_empty(entry.get("pdbx_PDB_ins_code"))
     comp_id = _text_or_empty(entry.get("label_comp_id")) or "?"
+    if entry.get("target_kind") == "region":
+        return f"{chain_id}:{seq_id}{ins_code}-{entry['end_auth_seq_id']}{_text_or_empty(entry.get('end_pdbx_PDB_ins_code'))}"
     return f"{chain_id}:{seq_id}{ins_code} {comp_id}"
+
+
+def _thread_sort_key(thread):
+    if thread.entries[0].get("target_kind") == "position":
+        return (1, *position_xyz(thread.entries[0]), thread.entries[-1]["id"])
+    return (0, thread.key[2] or thread.key[0],
+            thread.key[3] if thread.key[3] is not None else float("inf"),
+            thread.key[4], thread.key[5], thread.entries[-1]["id"])
 
 
 def group_threads(entries):
@@ -86,15 +116,7 @@ def group_threads(entries):
                 entries=sorted_entries,
             )
         )
-    threads.sort(
-        key=lambda item: (
-            item.key[2] or item.key[0],
-            item.key[3] if item.key[3] is not None else float("inf"),
-            item.key[4],
-            item.key[5],
-            item.entries[-1]["id"],
-        )
-    )
+    threads.sort(key=_thread_sort_key)
     return threads
 
 

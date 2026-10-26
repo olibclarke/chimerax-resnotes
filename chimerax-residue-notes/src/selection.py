@@ -1,6 +1,23 @@
 from chimerax.atomic import selected_residues
 
 
+def is_polymer_residue(residue):
+    if getattr(residue, "polymer_type", 0) != getattr(residue, "PT_NONE", 0):
+        return True
+    # Incomplete chain/entity assignments can leave real backbone residues PT_NONE.
+    name = getattr(residue, "name", "").upper()
+    if name in {"ALA", "ARG", "ASN", "ASP", "CYS", "GLN", "GLU", "GLY", "HIS", "ILE",
+                "LEU", "LYS", "MET", "PHE", "PRO", "SER", "THR", "TRP", "TYR", "VAL",
+                "MSE", "SEC", "PYL", "ASX", "GLX", "UNK"}:
+        backbone = ("N", "CA", "C")
+    elif name in {"A", "C", "G", "U", "T", "I", "DA", "DC", "DG", "DT", "DU", "DI"}:
+        backbone = ("C3'", "C4'", "O3'")
+    else:
+        return False
+    find_atom = getattr(residue, "find_atom", None)
+    return find_atom is not None and all(find_atom(name) is not None for name in backbone)
+
+
 def selected_residues_for_model(session, model=None):
     residues = list(selected_residues(session) or [])
     if model is None:
@@ -141,6 +158,8 @@ def _entry_int(entry, key):
 
 
 def annotation_entry_matches_residue(entry, residue):
+    if entry.get("target_kind") == "position":
+        return False
     residue_fields = residue_identifier_fields(residue)
     if residue_fields is None:
         return False
@@ -187,12 +206,101 @@ def annotation_entry_matches_residue(entry, residue):
 
 
 def find_residue_for_annotation(model, entry):
-    if model is None or entry is None:
+    if model is None or entry is None or entry.get("target_kind") == "position":
         return None
     for residue in safe_model_residues(model):
         if annotation_entry_matches_residue(entry, residue):
             return residue
     return None
+
+
+def _region_endpoint(model, entry, residues):
+    # Author identifiers are normally unique; disambiguate using label identifiers
+    # when a file intentionally reuses author numbering across polymer chains.
+    candidates = [r for r in residues
+                  if r.chain_id == _entry_text(entry, "auth_asym_id")
+                  and r.number == _entry_int(entry, "auth_seq_id")
+                  and (r.insertion_code or "") == _entry_text(entry, "pdbx_PDB_ins_code")
+                  and (_entry_text(entry, "label_comp_id") in ("", "?")
+                       or r.name == _entry_text(entry, "label_comp_id"))]
+    if len(candidates) == 1:
+        return candidates[0]
+    candidates = [r for r in candidates if residue_label_asym_id(r) == _entry_text(entry, "label_asym_id")]
+    if len(candidates) == 1:
+        return candidates[0]
+    label_seq = _entry_text(entry, "label_seq_id")
+    if label_seq:
+        seq_matches = [r for r in candidates if residue_label_seq_id(r) == label_seq]
+        if len(seq_matches) == 1:
+            return seq_matches[0]
+    # Notes address residue identifiers, not individual copies of the same ID.
+    if candidates and len({r.name for r in candidates}) == 1:
+        return candidates[0]
+    return None
+
+
+def find_residues_for_annotation(model, entry):
+    if model is None or entry is None or entry.get("target_kind") == "position":
+        return []
+    if entry.get("target_kind") != "region":
+        residue = find_residue_for_annotation(model, entry)
+        return [residue] if residue is not None else []
+    residues = safe_model_residues(model)
+    end_entry = {key: entry.get("end_" + key) for key in
+                 ("label_comp_id", "label_asym_id", "label_seq_id", "auth_asym_id", "auth_seq_id", "pdbx_PDB_ins_code")}
+    first = _region_endpoint(model, entry, residues)
+    last = _region_endpoint(model, end_entry, residues)
+    if first is None or last is None:
+        return []
+    if residue_label_asym_id(first) != residue_label_asym_id(last):
+        return []
+    chain_residues = [r for r in residues if r.chain_id == first.chain_id
+                      and residue_label_asym_id(r) == residue_label_asym_id(first)
+                      and is_polymer_residue(r)]
+    if first not in chain_residues or last not in chain_residues:
+        return []
+    identifiers = [(r.number, r.insertion_code or "") for r in chain_residues]
+    if len(set(identifiers)) != len(identifiers):
+        # Model order may contain whole repeated chain blocks. An index slice
+        # between blocks would wrongly include most of the chain.
+        lower, upper = sorted(((first.number, first.insertion_code or ""),
+                               (last.number, last.insertion_code or "")))
+        return [r for r, key in zip(chain_residues, identifiers) if lower <= key <= upper]
+    lower, upper = sorted((chain_residues.index(first), chain_residues.index(last)))
+    return chain_residues[lower:upper+1]
+
+
+def region_identifier_fields(first, last):
+    if first.structure is not last.structure or residue_label_asym_id(first) != residue_label_asym_id(last) or first.chain_id != last.chain_id:
+        raise ValueError("Choose polymer endpoints in the same model and chain.")
+    if not all(is_polymer_residue(r) for r in (first, last)):
+        raise ValueError("Region notes require polymer endpoints.")
+    residues = safe_model_residues(first.structure)
+    if residues.index(first) > residues.index(last):
+        first, last = last, first
+    fields = residue_identifier_fields(first)
+    fields.update({"end_"+key: value for key, value in residue_identifier_fields(last).items()})
+    fields["target_kind"] = "region"
+    return fields
+
+
+def selection_note_fields(residues, model):
+    """Describe exactly the selection, without filling unselected gaps."""
+    selected = set(residues)
+    if not selected:
+        raise ValueError("Select a residue or a contiguous range first.")
+    if any(r.structure is not model for r in selected):
+        raise ValueError("Select residues only in the annotation model.")
+    if len(selected) == 1:
+        return residue_identifier_fields(next(iter(selected)))
+    ordered = [r for r in safe_model_residues(model) if r in selected]
+    if len(ordered) != len(selected):
+        raise ValueError("The selected residues are no longer available.")
+    fields = region_identifier_fields(ordered[0], ordered[-1])
+    members = find_residues_for_annotation(model, fields)
+    if set(members) != selected:
+        raise ValueError("Select one contiguous polymer range in one chain; unselected gaps are not included.")
+    return fields
 
 
 def closest_residue_to_xyz(model, xyz):

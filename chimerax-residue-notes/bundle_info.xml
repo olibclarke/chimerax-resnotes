@@ -1,13 +1,13 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<BundleInfo name="ChimeraX-ResidueNotes" version="0.1.0" package="chimerax.residue_notes" minSessionVersion="1" maxSessionVersion="1" supersedes="">
+<BundleInfo name="ChimeraX-ResidueNotes" version="0.2.2" package="chimerax.residue_notes" minSessionVersion="1" maxSessionVersion="1" supersedes="">
   <Author>Oliver Clarke</Author>
   <Email></Email>
   <URL></URL>
-  <Synopsis>Read, browse, edit, and export Coot residue annotations embedded in mmCIF files.</Synopsis>
+  <Synopsis>Read, browse, edit, and export Coot residue, region, and positional notes in mmCIF files.</Synopsis>
   <Description>
     A first-pass ChimeraX bundle for reading and writing the custom
     _cootnote_residue_note.* mmCIF loop written by coot_trimmings.
-    It provides a simple residue-notes tool window with residue navigation
+    It provides a notes tool window for residues, regions, and Cartesian positions
     and explicit import/export of annotated mmCIF files, plus a read-only
     nearby-notes pane that follows the center of rotation.
   </Description>

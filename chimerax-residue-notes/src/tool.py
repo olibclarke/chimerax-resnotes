@@ -1,5 +1,6 @@
 import json
 import os
+import re
 
 from Qt.QtWidgets import QFileDialog, QInputDialog, QLabel, QMessageBox
 
@@ -15,13 +16,21 @@ from .selection import (
     annotation_entry_matches_residue,
     closest_residue_to_xyz,
     cofr_key,
+    cofr_xyz,
     find_residue_for_annotation,
+    find_residues_for_annotation,
+    region_identifier_fields,
+    safe_model_residues,
     residue_identifier_fields,
     selected_residues_for_model,
+    selection_note_fields,
     single_selected_residue,
 )
-from .state import ModelNoteState, entry_display_title, group_threads, next_note_id, note_thread_key, thread_preview
-from .ui import CollapsibleNoteCard, build_residue_notes_ui, prompt_for_note_fields
+from .state import model_note_state, entry_display_title, group_threads, next_note_id, note_thread_key, thread_preview
+from .ui import CollapsibleNoteCard, build_residue_notes_ui, prompt_for_note_fields, prompt_for_region_fields
+from .regions import EndpointHighlight, RegionHighlight, navigate_to_region
+from .picking import RegionEndpointPicker
+from .positions import PositionHighlight, navigate_to_position, position_identifier_fields
 
 
 def show_residue_notes_tool(session):
@@ -45,6 +54,9 @@ class ResidueNotesTool(ToolInstance):
         self._session_author = default_author()
         self._expanded_note_ids_by_thread = {}
         self._suppress_thread_navigation = False
+        self._region_highlight = RegionHighlight()
+        self._position_highlight = PositionHighlight()
+        self._region_picker = None
 
         self.tool_window = MainToolWindow(self)
         self._build_ui()
@@ -53,6 +65,9 @@ class ResidueNotesTool(ToolInstance):
         self.tool_window.manage("side")
 
     def delete(self):
+        self._cancel_region_picking()
+        self._region_highlight.clear()
+        self._position_highlight.clear()
         for handler in getattr(self, "_trigger_handlers", []):
             try:
                 handler.remove()
@@ -72,7 +87,9 @@ class ResidueNotesTool(ToolInstance):
                 "import_file": self._import_from_file,
                 "export_file": self._export_to_file,
                 "export_markdown": self._export_markdown_to_file,
-                "add_note": self._add_note_for_selected_residue,
+                "add_note": self._add_note_from_selection,
+                "add_region_note": self._add_note_for_region,
+                "add_position_note": self._add_note_at_cofr,
                 "edit_note": self._edit_selected_note,
                 "delete_note": self._delete_selected_note,
                 "thread_changed": self._on_thread_changed,
@@ -93,6 +110,8 @@ class ResidueNotesTool(ToolInstance):
         self.export_file_button = self.widgets.export_file_button
         self.export_markdown_button = self.widgets.export_markdown_button
         self.add_button = self.widgets.add_button
+        self.add_region_button = self.widgets.add_region_button
+        self.add_position_button = self.widgets.add_position_button
         self.edit_button = self.widgets.edit_button
         self.delete_button = self.widgets.delete_button
         self.thread_list = self.widgets.thread_list
@@ -104,7 +123,7 @@ class ResidueNotesTool(ToolInstance):
         self.prev_button = self.widgets.prev_button
         self.next_button = self.widgets.next_button
         self._building_ui = False
-        self._set_empty_detail_text("No annotated residues in the current model.")
+        self._set_empty_detail_text("No annotations in the current model.")
         self._update_button_states()
 
     def _atomic_models(self):
@@ -161,7 +180,7 @@ class ResidueNotesTool(ToolInstance):
     def _state_for_model(self, model):
         state = self._model_state.get(model)
         if state is None:
-            state = ModelNoteState()
+            state = model_note_state(model)
             self._model_state[model] = state
         if state.source_path is None:
             state.source_path = self._model_source_path(model)
@@ -347,12 +366,13 @@ class ResidueNotesTool(ToolInstance):
         has_model = model is not None
         has_threads = bool(self._thread_rows)
         can_import_embedded = has_model and self._can_import_embedded_for_model(model)
-        _label_prefix, residue = self._residue_target() if has_model else ("Selected residue", None)
         self.import_auto_button.setEnabled(can_import_embedded)
         self.import_file_button.setEnabled(has_model)
         self.export_file_button.setEnabled(has_model)
         self.export_markdown_button.setEnabled(has_model)
-        self.add_button.setEnabled(has_model and residue is not None)
+        self.add_button.setEnabled(has_model and bool(selected_residues_for_model(self.session)))
+        self.add_region_button.setEnabled(has_model)
+        self.add_position_button.setEnabled(has_model)
         self.edit_button.setEnabled(thread is not None)
         self.delete_button.setEnabled(thread is not None)
         self.expand_all_button.setEnabled(thread is not None)
@@ -439,6 +459,9 @@ class ResidueNotesTool(ToolInstance):
     def _on_model_changed(self, *_args):
         if self._building_ui:
             return
+        self._cancel_region_picking()
+        self._region_highlight.clear()
+        self._position_highlight.clear()
         self._closest_residue_cache = {"model": None, "cofr_key": None, "residue": None}
         model = self._current_model()
         if model is None:
@@ -475,6 +498,8 @@ class ResidueNotesTool(ToolInstance):
             self.thread_list.scrollToItem(current_item)
 
     def _refresh_threads(self, selected_key=None):
+        self._region_highlight.clear()
+        self._position_highlight.clear()
         model = self._current_model()
         current_row = self.thread_list.currentRow()
         if selected_key is None:
@@ -493,7 +518,8 @@ class ResidueNotesTool(ToolInstance):
             selected_row = None
             if selected_key is not None:
                 for index, thread in enumerate(self._thread_rows):
-                    if thread.key == selected_key or thread.key[:3] == selected_key:
+                    if thread.key == selected_key or (thread.entries[0].get("target_kind") != "position"
+                                                     and thread.key[:3] == selected_key):
                         selected_row = index
                         break
             if selected_row is None:
@@ -503,7 +529,7 @@ class ResidueNotesTool(ToolInstance):
                     selected_row = 0
             self._set_current_thread_row(selected_row, navigate=False)
         else:
-            self._set_empty_detail_text("No annotated residues in the current model.")
+            self._set_empty_detail_text("No annotations in the current model.")
         self._update_button_states()
 
     def _current_thread(self):
@@ -572,6 +598,29 @@ class ResidueNotesTool(ToolInstance):
         model = self._current_model()
         if model is None or thread is None:
             return
+        self._region_highlight.clear()
+        self._position_highlight.clear()
+        if thread.entries and thread.entries[0].get("target_kind") == "position":
+            try:
+                navigate_to_position(self.session, model, thread.entries[0], self._position_highlight)
+                self._set_status(thread.label)
+            except Exception as error:
+                self._position_highlight.clear()
+                self._set_status(f"Could not navigate to position: {error}")
+            return
+        if thread.entries and thread.entries[0].get("target_kind") == "region":
+            residues = find_residues_for_annotation(model, thread.entries[0])
+            if not residues:
+                self._set_status("Region endpoints are missing or ambiguous in this model")
+                return
+            try:
+                navigate_to_region(self.session, residues, self._region_highlight)
+            except Exception as error:
+                self._region_highlight.clear()
+                self._set_status(f"Could not navigate to region: {error}")
+                return
+            self._set_status(f"Region: {thread.label}")
+            return
         residue = self._find_residue(model, thread.key)
         if residue is None:
             return
@@ -580,7 +629,7 @@ class ResidueNotesTool(ToolInstance):
     def _activate_current_thread(self, *, navigate=True):
         thread = self._current_thread()
         if thread is None:
-            self._set_empty_detail_text("Select an annotated residue to view notes.")
+            self._set_empty_detail_text("Select an annotation to view notes.")
             self._update_button_states()
             return
         self._render_thread_detail(thread)
@@ -638,6 +687,7 @@ class ResidueNotesTool(ToolInstance):
             scrollbar.setValue(0)
 
     def _on_thread_changed(self, row):
+        self._position_highlight.clear()
         self._update_active_residue_label()
         self._activate_current_thread(navigate=not self._suppress_thread_navigation)
 
@@ -711,7 +761,7 @@ class ResidueNotesTool(ToolInstance):
             fallback_id=1,
         )
         if normalized is None:
-            QMessageBox.information(self.tool_window.ui_area, "Residue Notes", "Please enter a non-empty note.")
+            QMessageBox.information(self.tool_window.ui_area, "Residue Notes", "Please enter a title or note.")
             return None
         self._session_author = normalized["author"]
         return normalized["title"], normalized["author"], normalized["note"]
@@ -752,6 +802,143 @@ class ResidueNotesTool(ToolInstance):
                 new_entry.get("label_comp_id", "?"),
             )
         )
+
+    def _add_note_from_selection(self):
+        model = self._current_model()
+        if model is None:
+            return
+        self._cancel_region_picking()
+        try:
+            template = selection_note_fields(selected_residues_for_model(self.session), model)
+        except ValueError as error:
+            self._set_status(str(error))
+            return
+        self._finish_selection_note(model, template)
+
+    def _finish_selection_note(self, model, template):
+        prompted = self._prompt_for_note()
+        if prompted is None:
+            return
+        if model not in self._atomic_models() or not find_residues_for_annotation(model, template):
+            self._set_status("The annotation model or residues are no longer available")
+            return
+        title, author, note = prompted
+        entry = normalize_entry({**template, "id": next_note_id(self._state_for_model(model).entries),
+                                 "title": title, "author": author, "note": note, "modified_utc": now_utc()})
+        if entry is not None:
+            self._state_for_model(model).entries.append(entry)
+            self._refresh_threads(selected_key=note_thread_key(entry))
+            self._set_status("Added note from selection")
+
+    def _add_note_for_region(self):
+        if self._region_picker is not None:
+            self._cancel_region_picking()
+            self._set_status("Range picking cancelled")
+            return
+        model = self._current_model()
+        if model is None:
+            return
+        selected = selected_residues_for_model(self.session, model)
+        chain, start_text, end_text = "", "", ""
+        if selected and len({r.chain_id for r in selected}) == 1:
+            order = {r: i for i, r in enumerate(safe_model_residues(model))}
+            selected.sort(key=lambda r: order[r])
+            chain = selected[0].chain_id
+            start_text = f"{selected[0].number}{selected[0].insertion_code or ''}"
+            end_text = f"{selected[-1].number}{selected[-1].insertion_code or ''}"
+        values = prompt_for_region_fields(self.tool_window.ui_area, chain=chain, start=start_text, end=end_text)
+        if values is None:
+            return
+        if values == "pick":
+            self._start_region_picking(model)
+            return
+        chain, start_text, end_text = values
+        try:
+            endpoints = []
+            for text in (start_text, end_text):
+                match = re.fullmatch(r"(-?\d+)([A-Za-z]*)", text)
+                if match is None:
+                    raise ValueError("Use residue identifiers such as 75 or 75A.")
+                matches = [r for r in safe_model_residues(model) if r.chain_id == chain
+                           and r.number == int(match[1]) and (r.insertion_code or "") == match[2]]
+                if len(matches) != 1:
+                    raise ValueError(f"Endpoint {chain}:{text} is missing or ambiguous in this model.")
+                endpoints.append(matches[0])
+            region_identifier_fields(*endpoints)
+        except ValueError as error:
+            QMessageBox.information(self.tool_window.ui_area, "Region Notes", str(error))
+            return
+        self._finish_region_note(model, endpoints)
+
+    def _add_note_at_cofr(self):
+        model = self._current_model()
+        if model is None:
+            return
+        try:
+            template = position_identifier_fields(model, cofr_xyz(self.session))
+        except ValueError as error:
+            self._set_status(str(error))
+            return
+        # Capture before opening the editor; editing text never moves the point.
+        prompted = self._prompt_for_note()
+        if prompted is None:
+            return
+        if model not in self._atomic_models():
+            self._set_status("The annotation model is no longer available")
+            return
+        title, author, note = prompted
+        entry = normalize_entry({**template, "id": next_note_id(self._state_for_model(model).entries),
+                                 "title": title, "author": author, "note": note, "modified_utc": now_utc()})
+        if entry is None:
+            return
+        self._state_for_model(model).entries.append(entry)
+        self._refresh_threads(selected_key=note_thread_key(entry))
+        self._set_status("Added note at center of rotation")
+
+    def _cancel_region_picking(self):
+        picker = self._region_picker
+        self._region_picker = None
+        if picker is not None:
+            picker.stop()
+        if hasattr(self, "add_region_button"):
+            self.add_region_button.setText("Choose range...")
+
+    def _start_region_picking(self, model):
+        self._cancel_region_picking()
+        self._region_highlight.clear()
+
+        def completed(endpoints):
+            self._cancel_region_picking()
+            if endpoints is not None:
+                self._finish_region_note(model, endpoints)
+            else:
+                self._set_status("The annotation model is no longer available")
+
+        picker = RegionEndpointPicker(self.session, model, completed, self._set_status,
+                                      lambda: model in self._atomic_models())
+        self._region_picker = picker
+        self.add_region_button.setText("Cancel picking")
+        try:
+            picker.start()
+        except Exception as error:
+            self._cancel_region_picking()
+            self._set_status(f"Could not start range picking: {error}")
+
+    def _finish_region_note(self, model, endpoints):
+        if model not in self._atomic_models() or any(getattr(r, "deleted", False) for r in endpoints):
+            self._set_status("The region model or endpoints are no longer available")
+            return
+        try:
+            template = region_identifier_fields(*endpoints)
+        except ValueError as error:
+            self._set_status(str(error))
+            return
+        markers = EndpointHighlight()
+        try:
+            markers.show(endpoints)
+            self._finish_selection_note(model, template)
+        finally:
+            markers.clear()
 
     def _choose_note_entry(self, thread, title):
         if thread is None:
@@ -923,7 +1110,7 @@ class ResidueNotesTool(ToolInstance):
         try:
             run(
                 self.session,
-                "save {0} format mmcif models #{1}".format(
+                "save {0} format mmcif models #{1} relModel #{1}".format(
                     json.dumps(file_path),
                     model.id_string,
                 ),
