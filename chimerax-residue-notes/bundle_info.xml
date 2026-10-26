@@ -24,7 +24,7 @@
     <ChimeraXClassifier>Command :: resnotes export-markdown :: General :: Export residue notes as a Markdown table</ChimeraXClassifier>
     <ChimeraXClassifier>Command :: resnotes refresh :: General :: Refresh the Residue Notes tool state</ChimeraXClassifier>
   </Classifiers>
-  <DataFiles package="chimerax.residue_notes">
-    <DataFile>docs/user/tools/residue_notes.html</DataFile>
-  </DataFiles>
+  <ExtraFiles package="chimerax.residue_notes">
+    <ExtraFile source="docs/user/tools/residue_notes.html">docs/user/tools/residue_notes.html</ExtraFile>
+  </ExtraFiles>
 </BundleInfo>
