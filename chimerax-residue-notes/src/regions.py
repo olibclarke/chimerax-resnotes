@@ -1,43 +1,5 @@
-"""Temporary region highlighting, independent of note storage and UI widgets."""
-
-
-class RegionHighlight:
-    colour = (255, 165, 0, 255)
-
-    def __init__(self):
-        self._atoms = []
-        self._residues = []
-
-    def clear(self):
-        for atom, colour, display, shown in self._atoms:
-            if getattr(atom, "deleted", False):
-                continue
-            if tuple(atom.color) == self.colour:
-                atom.color = colour
-            if shown:
-                atom.display = display
-        for residue, colour in self._residues:
-            if not getattr(residue, "deleted", False) and tuple(residue.ribbon_color) == self.colour:
-                residue.ribbon_color = colour
-        self._atoms.clear()
-        self._residues.clear()
-
-    def show(self, residues):
-        self.clear()
-        visible = any(getattr(r, "ribbon_display", False) or any(a.display for a in r.atoms) for r in residues)
-        try:
-            for residue in residues:
-                self._residues.append((residue, tuple(residue.ribbon_color)))
-                residue.ribbon_color = self.colour
-                for atom in residue.atoms:
-                    shown = not visible and atom.name.strip() in ("CA", "P")
-                    self._atoms.append((atom, tuple(atom.color), atom.display, shown))
-                    atom.color = self.colour
-                    if shown:
-                        atom.display = True
-        except Exception:
-            self.clear()
-            raise
+"""Region selection/navigation and non-atomic endpoint markers."""
+from .navigation import preserve_cofr_mode, set_navigation_clip
 
 
 class EndpointHighlight:
@@ -72,24 +34,20 @@ class EndpointHighlight:
             raise
 
 
-def navigate_to_region(session, residues, highlight):
+def navigate_to_region(session, residues):
     from chimerax.atomic import concatenate
     from chimerax.geometry import Bounds
     atoms = concatenate([r.atoms for r in residues])
     bounds = atoms.scene_bounds
     if bounds is None:
         raise ValueError("The annotated region has no atoms to navigate to.")
-    highlight.show(residues)
     session.selection.clear()
     atoms.selected = True
     centre = bounds.center()
     # Keep a little context even for a very small motif.
     bounds = Bounds(bounds.xyz_min-3.0, bounds.xyz_max+3.0)
     view = session.main_view
-    view.view_all(bounds, pad=0.2)
-    # Like native `view`, move an existing near/far slab to the new target.
-    direction = view.camera.view_direction()
-    for name, sign in (("near", -1), ("far", 1)):
-        if view.clip_planes.find_plane(name) is not None:
-            view.clip_planes.set_clip_position(name, centre + sign * bounds.radius() * direction, view)
-    view.center_of_rotation = centre
+    with preserve_cofr_mode(session):
+        view.view_all(bounds, pad=0.2)
+        set_navigation_clip(view, centre, atoms.scene_coords)
+        view.center_of_rotation = centre

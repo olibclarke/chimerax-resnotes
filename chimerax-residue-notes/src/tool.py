@@ -28,9 +28,10 @@ from .selection import (
 )
 from .state import model_note_state, entry_display_title, group_threads, next_note_id, note_thread_key, thread_preview
 from .ui import CollapsibleNoteCard, build_residue_notes_ui, prompt_for_note_fields, prompt_for_region_fields
-from .regions import EndpointHighlight, RegionHighlight, navigate_to_region
+from .regions import EndpointHighlight, navigate_to_region
 from .picking import RegionEndpointPicker
 from .positions import PositionHighlight, navigate_to_position, position_identifier_fields
+from .navigation import preserve_cofr_mode
 
 
 def show_residue_notes_tool(session):
@@ -54,7 +55,6 @@ class ResidueNotesTool(ToolInstance):
         self._session_author = default_author()
         self._expanded_note_ids_by_thread = {}
         self._suppress_thread_navigation = False
-        self._region_highlight = RegionHighlight()
         self._position_highlight = PositionHighlight()
         self._region_picker = None
 
@@ -66,7 +66,6 @@ class ResidueNotesTool(ToolInstance):
 
     def delete(self):
         self._cancel_region_picking()
-        self._region_highlight.clear()
         self._position_highlight.clear()
         for handler in getattr(self, "_trigger_handlers", []):
             try:
@@ -460,7 +459,6 @@ class ResidueNotesTool(ToolInstance):
         if self._building_ui:
             return
         self._cancel_region_picking()
-        self._region_highlight.clear()
         self._position_highlight.clear()
         self._closest_residue_cache = {"model": None, "cofr_key": None, "residue": None}
         model = self._current_model()
@@ -498,7 +496,6 @@ class ResidueNotesTool(ToolInstance):
             self.thread_list.scrollToItem(current_item)
 
     def _refresh_threads(self, selected_key=None):
-        self._region_highlight.clear()
         self._position_highlight.clear()
         model = self._current_model()
         current_row = self.thread_list.currentRow()
@@ -584,21 +581,20 @@ class ResidueNotesTool(ToolInstance):
         else:
             context_zoom_factor = 0.65
         run(self.session, f"select {residue.atomspec}")
-        try:
-            # First center the residue in the view, then pin CoFR to it, then
-            # zoom out to reveal local context while keeping the residue central.
-            run(self.session, f"view {residue.atomspec} pad 0.2")
-            run(self.session, f"cofr {residue.atomspec}")
-            run(self.session, f"zoom {context_zoom_factor}")
-            run(self.session, f"cofr {residue.atomspec}")
-        except Exception:
-            run(self.session, f"view {residue.atomspec}")
+        with preserve_cofr_mode(self.session):
+            try:
+                # Centre the residue, then reveal context without changing rotation mode.
+                run(self.session, f"view {residue.atomspec} pad 0.2")
+                run(self.session, f"cofr {residue.atomspec}")
+                run(self.session, f"zoom {context_zoom_factor}")
+                run(self.session, f"cofr {residue.atomspec}")
+            except Exception:
+                run(self.session, f"view {residue.atomspec}")
 
     def _goto_thread(self, thread):
         model = self._current_model()
         if model is None or thread is None:
             return
-        self._region_highlight.clear()
         self._position_highlight.clear()
         if thread.entries and thread.entries[0].get("target_kind") == "position":
             try:
@@ -614,9 +610,8 @@ class ResidueNotesTool(ToolInstance):
                 self._set_status("Region endpoints are missing or ambiguous in this model")
                 return
             try:
-                navigate_to_region(self.session, residues, self._region_highlight)
+                navigate_to_region(self.session, residues)
             except Exception as error:
-                self._region_highlight.clear()
                 self._set_status(f"Could not navigate to region: {error}")
                 return
             self._set_status(f"Region: {thread.label}")
@@ -905,7 +900,6 @@ class ResidueNotesTool(ToolInstance):
 
     def _start_region_picking(self, model):
         self._cancel_region_picking()
-        self._region_highlight.clear()
 
         def completed(endpoints):
             self._cancel_region_picking()

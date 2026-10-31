@@ -25,7 +25,7 @@ from .selection import cofr_key, distance_sq, find_residues_for_annotation, resi
 from .state import model_note_state, entry_display_title, group_threads, note_thread_key, thread_preview
 from .ui import CollapsibleNoteCard
 from .positions import PositionHighlight, navigate_to_position, position_scene_xyz
-from .regions import RegionHighlight, navigate_to_region
+from .regions import navigate_to_region
 
 
 @dataclass
@@ -55,7 +55,6 @@ class NearbyNotesTool(ToolInstance):
         self._thread_members = []
         self._building_ui = False
         self._position_highlight = PositionHighlight()
-        self._region_highlight = RegionHighlight()
         self._position_key = None
 
         self.tool_window = MainToolWindow(self)
@@ -66,7 +65,6 @@ class NearbyNotesTool(ToolInstance):
 
     def delete(self):
         self._position_highlight.clear()
-        self._region_highlight.clear()
         for handler in getattr(self, "_trigger_handlers", []):
             try:
                 handler.remove()
@@ -379,7 +377,6 @@ class NearbyNotesTool(ToolInstance):
         model = self._current_model()
         if model is None:
             self._position_highlight.clear()
-            self._region_highlight.clear()
             self._position_key = None
             self.thread_list.clear()
             self._thread_rows = []
@@ -462,7 +459,6 @@ class NearbyNotesTool(ToolInstance):
             )
         else:
             self._position_highlight.clear()
-            self._region_highlight.clear()
             self._position_key = None
             self._set_empty_detail_text(f"No nearby notes within {radius:.1f} A of CoFR.")
             self._set_status(f"No nearby notes within {radius:.1f} A of CoFR")
@@ -532,7 +528,6 @@ class NearbyNotesTool(ToolInstance):
         if self._building_ui:
             return
         self._position_highlight.clear()
-        self._region_highlight.clear()
         self._position_key = None
         self._last_nearby_signature = None
         self._refresh_nearby_threads(force=True)
@@ -541,7 +536,6 @@ class NearbyNotesTool(ToolInstance):
         row = self._current_thread_row()
         if row is None or row.thread.key != self._position_key:
             self._position_highlight.clear()
-            self._region_highlight.clear()
             self._position_key = None
         self._render_current_thread()
 
@@ -552,7 +546,6 @@ class NearbyNotesTool(ToolInstance):
         model = self._current_model()
         entry = row.thread.entries[0]
         self._position_highlight.clear()
-        self._region_highlight.clear()
         self._position_key = None
         try:
             if entry.get("target_kind") == "position":
@@ -561,13 +554,12 @@ class NearbyNotesTool(ToolInstance):
                 members = find_residues_for_annotation(model, entry)
                 if not members:
                     raise ValueError("Region endpoints are missing or ambiguous in this model")
-                navigate_to_region(self.session, members, self._region_highlight)
+                navigate_to_region(self.session, members)
             else:
                 return
             self._position_key = row.thread.key
         except Exception as error:
             self._position_highlight.clear()
-            self._region_highlight.clear()
             self._set_status(f"Could not navigate to note: {error}")
 
     def _radius_changed(self, *_args):

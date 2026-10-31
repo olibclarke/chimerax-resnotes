@@ -1,5 +1,6 @@
 """Positional notes use the associated model's Cartesian coordinate frame."""
 import math
+from .navigation import preserve_cofr_mode, set_navigation_clip
 
 
 POSITION_FIELDS = ("position_x", "position_y", "position_z")
@@ -72,6 +73,8 @@ def navigate_to_position(session, model, entry, highlight):
     origin, direction = view.camera.position.origin(), view.camera.view_direction()
     # Centre the point without changing orientation or zoom, even with an off-axis CoFR.
     screen_centre = origin + dot(view.center_of_rotation - origin, direction) * direction
-    view.translate(screen_centre - xyz, move_near_far_clip_planes=True)
-    view.center_of_rotation = xyz
+    with preserve_cofr_mode(session):
+        view.translate(screen_centre - xyz, move_near_far_clip_planes=True)
+        set_navigation_clip(view, xyz)
+        view.center_of_rotation = xyz
     highlight.show(model, entry)

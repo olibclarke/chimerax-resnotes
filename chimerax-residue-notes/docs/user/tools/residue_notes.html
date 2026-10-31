@@ -5,7 +5,7 @@
 <body>
   <h1>Residue Notes</h1>
   <p>
-    The <b>Residue Notes</b> tool is a first-pass ChimeraX interface for reading,
+    The <b>Residue Notes</b> tool is a ChimeraX interface for reading,
     browsing, editing, and exporting residue annotations embedded in mmCIF files
     using the custom <code>_cootnote_residue_note.*</code> loop written by
     <code>coot_trimmings</code>.
@@ -14,6 +14,8 @@
     Notes are grouped by residue, single-chain region, or Cartesian position and can be navigated with the thread list or the
     previous/next buttons. Export writes an annotated mmCIF by saving the current
     model as mmCIF and then injecting the custom annotation loop.
+    Navigation preserves the current center-of-rotation mode and pivot marker
+    settings, including those set with <code>cofron</code>.
   </p>
   <p>
     Choose <b>Add note at center of rotation</b> to annotate a point without a
@@ -36,10 +38,18 @@
     disappear when finished or cancelled and are never exported as atoms.
     The previous mouse binding is restored afterwards.
     Insertion codes and numbering gaps are supported. A title alone is enough
-    for a short region label. Clicking its thread navigates to and temporarily
-    highlights the entire range in either notes pane; leaving it or closing
-    the tool clears the highlight. The centre follows the current range atoms,
+    for a short region label. Clicking its thread navigates to and selects
+    the entire range in either notes pane, without changing atom/ribbon colours
+    or visibility. The centre follows the current range atoms,
     including after model transformations or annotated mmCIF reloads.
+  </p>
+  <p>
+    Range and positional navigation sets a symmetric, camera-aligned clipping
+    slab centred on the target, at least 10 &Aring; deep (5 &Aring; on each side).
+    Larger ranges get at
+    least 10 &Aring; of depth context beyond their atoms on each side. Old
+    scene-fixed front/back planes are replaced by the new near/far slab, while
+    the current center-of-rotation mode and pivot marker settings are preserved.
   </p>
   <p>
     The <code>nearby_notes</code> command opens a read-only browser around the
@@ -47,6 +57,18 @@
     the selected radius. Positional notes use their point's distance from CoFR;
     clicking one navigates to it. Both panes share edits immediately; saving annotated
     mmCIF or Markdown remains explicit.
+  </p>
+  <p>
+    <b>Preserving notes:</b> export annotated mmCIF to retain editable notes with
+    the model, or export Markdown for a report. Ordinary model saving and ChimeraX
+    session saving do not preserve new notes. Gemmi and a Coot installation are
+    not required to use this bundle.
+  </p>
+  <p>
+    Maintainer: Oliver Clarke
+    (<a href="mailto:olibclarke@gmail.com">olibclarke@gmail.com</a>).
+    <a href="https://github.com/olibclarke/chimerax-resnotes/issues">Report an issue</a>.
+    Distributed under the MIT license.
   </p>
 </body>
 </html>

@@ -7,3 +7,5 @@ dist/
 .pytest_cache/
 *.log
 chimerax-residue-notes/src/docs/
+chimerax-residue-notes/src/license.txt
+chimerax-residue-notes/release/

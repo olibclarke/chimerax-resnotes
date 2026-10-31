@@ -8,23 +8,133 @@ import traceback
 from types import SimpleNamespace
 from unittest.mock import patch
 
-from numpy import array, allclose, dot
+from numpy import array, allclose, array_equal, arange, dot
 from chimerax.atomic import AtomicStructure
 from chimerax.core.commands import run
 from chimerax.geometry import rotation, translation
 
 
+def atom_coordinates_by_identity(model):
+    result = {}
+    for atom in model.atoms:
+        residue = atom.residue
+        key = (residue.chain_id, residue.number, residue.insertion_code,
+               residue.name, atom.name, atom.alt_loc)
+        assert key not in result, 'Test fixture has ambiguous atom identifiers'
+        result[key] = tuple(atom.coord)
+    return result
+
+
+def check_cofr_modes(session, editor, nearby, model, positions, selection, state):
+    from chimerax.std_commands.cofr import PivotIndicator
+    view = session.main_view
+    colours = model.atoms.colors.copy()
+    colours[:, 0] = arange(len(colours)) % 251
+    colours[:, 1] = 85
+    model.atoms.colors = colours
+    ribbon_colours = model.residues.ribbon_colors.copy()
+    ribbon_colours[:, 2] = arange(len(ribbon_colours)) % 241
+    model.residues.ribbon_colors = ribbon_colours
+    atom_displays = model.atoms.displays.copy()
+    ribbon_displays = model.residues.ribbon_displays.copy()
+
+    def appearance_unchanged():
+        assert array_equal(model.atoms.colors, colours), 'Navigation changed atom colours'
+        assert array_equal(model.residues.ribbon_colors, ribbon_colours), 'Navigation changed ribbon colours'
+        assert array_equal(model.atoms.displays, atom_displays), 'Navigation changed atom visibility'
+        assert array_equal(model.residues.ribbon_displays, ribbon_displays), 'Navigation changed ribbon visibility'
+
+    def symmetric_clip(centre, members=None):
+        near, far = [view.clip_planes.find_plane(name) for name in ('near', 'far')]
+        assert near is not None and far is not None, 'Missing symmetric clip planes'
+        assert allclose((near.plane_point+far.plane_point)/2, centre, atol=1e-3), 'Clip slab is off-centre'
+        half = abs(dot(far.plane_point-centre, view.camera.view_direction()))
+        assert half >= 5-1e-3, 'Clip slab is too tight'
+        if members is None:
+            assert abs(half-5) < 1e-3, 'Position slab should match symclip 5'
+        assert view.clip_planes.find_plane('front') is None and view.clip_planes.find_plane('back') is None
+        if members:
+            from chimerax.atomic import concatenate
+            depths = dot(concatenate([r.atoms for r in members]).scene_coords-centre, view.camera.view_direction())
+            assert max(abs(depths)) <= half-10+1e-3, 'Range lacks clipping context'
+    for mode in ('fixed', 'center of view', 'front center'):
+        for visible in (False, True):
+            run(session, 'cofr centerOfView showPivot '+('7,0.25' if visible else 'false'))
+            indicators = [drawing for drawing in view.drawing.child_drawings()
+                          if isinstance(drawing, PivotIndicator)]
+            geometry = [drawing.vertices.copy() for drawing in indicators]
+            def unchanged():
+                appearance_unchanged()
+                assert view.center_of_rotation_method == mode, (mode, view.center_of_rotation_method)
+                assert indicators == [drawing for drawing in view.drawing.child_drawings()
+                                      if isinstance(drawing, PivotIndicator)], 'Pivot visibility changed'
+                assert all(allclose(drawing.vertices, vertices)
+                           for drawing, vertices in zip(indicators, geometry)), 'Pivot size changed'
+            view.center_of_rotation_method = mode
+            for index in range(len(editor._thread_rows)):
+                editor._set_current_thread_row(index, navigate=False)
+                editor._on_thread_clicked()
+                unchanged()
+                run(session, 'wait 2')
+                unchanged()
+                entry = editor._current_thread().entries[0]
+                if entry.get('target_kind') == 'position':
+                    centre = positions.position_scene_xyz(model, entry)
+                else:
+                    members = selection.find_residues_for_annotation(model, entry)
+                    from chimerax.atomic import concatenate
+                    centre = concatenate([r.atoms for r in members]).scene_bounds.center()
+                camera_point = view.camera.position.inverse() * centre
+                assert allclose(camera_point[:2], (0, 0), atol=1e-3), 'Target is not centred'
+                kind = entry.get('target_kind')
+                if kind in ('region', 'position'):
+                    symmetric_clip(centre, members if kind == 'region' else None)
+                if kind == 'region':
+                    assert all(atom.selected for residue in members for atom in residue.atoms), 'Range was not selected'
+            editor._goto_previous_thread()
+            unchanged()
+            editor._goto_next_thread()
+            unchanged()
+            for kind in ('region', 'position'):
+                entry = next(e for e in state.model_note_state(model).entries if e.get('target_kind') == kind)
+                centre = (positions.position_scene_xyz(model, entry) if kind == 'position' else
+                          selection.residue_center_xyz(selection.find_residues_for_annotation(model, entry)[0]))
+                view.center_of_rotation = centre
+                nearby.focus_model(model)
+                nearby.radius_spin.setValue(50)
+                nearby._refresh_nearby_threads(force=True)
+                row = next(i for i, row in enumerate(nearby._thread_rows)
+                           if row.thread.entries[0].get('target_kind') == kind)
+                nearby.thread_list.setCurrentRow(row)
+                view.center_of_rotation_method = mode
+                nearby._on_thread_clicked()
+                unchanged()
+                target_centre = (positions.position_scene_xyz(model, entry) if kind == 'position' else
+                                 selection.find_residues_for_annotation(model, entry)[0].atoms.scene_bounds.center())
+                if kind == 'region':
+                    from chimerax.atomic import concatenate
+                    members = selection.find_residues_for_annotation(model, entry)
+                    target_centre = concatenate([r.atoms for r in members]).scene_bounds.center()
+                symmetric_clip(target_centre, members if kind == 'region' else None)
+    run(session, 'cofr fixed showPivot false')
+    print('COFR_NAVIGATION: PASS; all modes, pivot on/off, both panes and previous/next', flush=True)
+    print('RANGE_SELECTION_CLIPPING: PASS; colours/visibility retained, symmetric padded slabs', flush=True)
+
+
 def check(session):
     root = Path(__file__).resolve().parents[1]
-    package = ModuleType('positional_notes_gui_check')
-    package.__path__ = [str(root/'src')]
-    sys.modules[package.__name__] = package
-    tool_module = importlib.import_module(package.__name__+'.tool')
-    nearby_module = importlib.import_module(package.__name__+'.nearby_tool')
-    io = importlib.import_module(package.__name__+'.io')
-    state = importlib.import_module(package.__name__+'.state')
-    positions = importlib.import_module(package.__name__+'.positions')
-    selection = importlib.import_module(package.__name__+'.selection')
+    package_name = 'chimerax.residue_notes'
+    if not os.environ.get('RESNOTES_TEST_INSTALLED'):
+        package = ModuleType('positional_notes_gui_check')
+        package.__path__ = [str(root/'src')]
+        sys.modules[package.__name__] = package
+        package_name = package.__name__
+    tool_module = importlib.import_module(package_name+'.tool')
+    nearby_module = importlib.import_module(package_name+'.nearby_tool')
+    io = importlib.import_module(package_name+'.io')
+    state = importlib.import_module(package_name+'.state')
+    positions = importlib.import_module(package_name+'.positions')
+    selection = importlib.import_module(package_name+'.selection')
     fixture = root.parent/'annotated_example.cif'
     if not fixture.is_file():
         fixture = root.parent/'coot-trimmings/coot-download/pdb3ch3.ent'
@@ -34,6 +144,7 @@ def check(session):
     note_state.entries.clear()
     note_state.loaded_from_source = True
     before = model.atoms.coords.copy()
+    before_by_identity = atom_coordinates_by_identity(model)
     model.scene_position = translation((20, -30, 40)) * rotation((0, 0, 1), 37)
     local_point = array((125.125, -321.5, 999.25))
     scene_point = model.scene_position * local_point
@@ -168,7 +279,7 @@ def check(session):
     nearby._on_thread_clicked()
     centre = model.residues[:3].atoms.scene_bounds.center()
     assert allclose(view.center_of_rotation, centre), 'Nearby region did not centre the range'
-    assert nearby._region_highlight._residues
+    assert all(atom.selected for residue in model.residues[:3] for atom in residue.atoms)
     for name in ('near', 'far'):
         assert abs(dot(view.clip_planes.find_plane(name).plane_point - centre, direction)) < 30
     run(session, 'wait 2')
@@ -182,7 +293,11 @@ def check(session):
     assert allclose(model.atoms.coords, before)
     run(session, 'open "'+str(output)+'"')
     reloaded = [m for m in session.models.list(type=AtomicStructure) if m != model][0]
-    assert allclose(reloaded.atoms.coords, before, atol=0.001), 'Export frame differs from note frame'
+    # Native mmCIF writing can reorder waters without changing their coordinates.
+    after_by_identity = atom_coordinates_by_identity(reloaded)
+    assert after_by_identity.keys() == before_by_identity.keys(), 'Export changed atom identifiers'
+    assert all(allclose(after_by_identity[key], xyz, atol=0.001)
+               for key, xyz in before_by_identity.items()), 'Export frame differs from note frame'
     editor._set_current_model(reloaded)
     assert len(state.model_note_state(reloaded).entries) == 3
     assert any(t.entries[0]['target_kind'] == 'position' for t in editor._thread_rows)
@@ -193,6 +308,12 @@ def check(session):
     assert allclose(view.center_of_rotation, reloaded_centre), 'Reloaded region centre is wrong'
     run(session, 'wait 2')
     assert allclose(view.center_of_rotation, reloaded_centre)
+    check_cofr_modes(session, editor, nearby, reloaded, positions, selection, state)
+    screenshot = os.environ.get('RESNOTES_RELEASE_SCREENSHOT')
+    if screenshot:
+        from Qt.QtWidgets import QApplication
+        QApplication.processEvents()
+        assert session.ui.main_window.grab().save(screenshot), 'Could not capture the tool window'
     editor.delete()
     nearby.delete()
     assert allclose(model.atoms.coords, before)
@@ -255,8 +376,9 @@ def check_supplied_model(session, tool_module, state, selection):
     print('SUPPLIED_MODEL_SELECTION: PASS', flush=True)
 
 
-try:
-    check(session)
-except Exception:
-    traceback.print_exc()
-    print('POSITION_NOTES_GUI: FAIL', flush=True)
+if 'session' in globals():
+    try:
+        check(session)
+    except Exception:
+        traceback.print_exc()
+        print('POSITION_NOTES_GUI: FAIL', flush=True)

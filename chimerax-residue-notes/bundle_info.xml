@@ -1,20 +1,33 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<BundleInfo name="ChimeraX-ResidueNotes" version="0.2.2" package="chimerax.residue_notes" minSessionVersion="1" maxSessionVersion="1" supersedes="">
+<BundleInfo name="ChimeraX-ResidueNotes" version="0.2.6" package="chimerax.residue_notes" limitedAPI="3.10" minSessionVersion="1" maxSessionVersion="1" supersedes="">
   <Author>Oliver Clarke</Author>
-  <Email></Email>
-  <URL></URL>
+  <Email>olibclarke@gmail.com</Email>
+  <URL>https://github.com/olibclarke/chimerax-resnotes</URL>
+  <License>MIT</License>
   <Synopsis>Read, browse, edit, and export Coot residue, region, and positional notes in mmCIF files.</Synopsis>
   <Description>
-    A first-pass ChimeraX bundle for reading and writing the custom
-    _cootnote_residue_note.* mmCIF loop written by coot_trimmings.
-    It provides a notes tool window for residues, regions, and Cartesian positions
-    and explicit import/export of annotated mmCIF files, plus a read-only
-    nearby-notes pane that follows the center of rotation.
+    Annotate residues, single-chain regions, and spatial positions in molecular
+    structures. Browse nearby notes around the center of rotation, navigate with
+    range selection and temporary point markers, and exchange annotations with Coot Trimmings
+    using annotated mmCIF or export a Markdown report. Saving annotations is
+    explicit; ordinary model/session saving is not modified.
   </Description>
+  <Dependencies>
+    <Dependency name="ChimeraX-Core" version="&gt;=1.11"/>
+    <Dependency name="ChimeraX-Atomic" version="&gt;=1.0"/>
+    <Dependency name="ChimeraX-UI" version="&gt;=1.0"/>
+    <Dependency name="ChimeraX-Geometry" version="&gt;=1.0"/>
+    <Dependency name="ChimeraX-Graphics" version="&gt;=1.0"/>
+    <Dependency name="ChimeraX-MouseModes" version="&gt;=1.0"/>
+    <Dependency name="ChimeraX-Surface" version="&gt;=1.0"/>
+    <Dependency name="ChimeraX-mmCIF" version="&gt;=2.0"/>
+    <Dependency name="numpy" version="&gt;=1.23"/>
+  </Dependencies>
   <Categories>
     <Category name="General"/>
   </Categories>
   <Classifiers>
+    <PythonClassifier>License :: OSI Approved :: MIT License</PythonClassifier>
     <ChimeraXClassifier>Tool :: Residue Notes :: General :: Browse residue annotations embedded in mmCIF files</ChimeraXClassifier>
     <ChimeraXClassifier>Tool :: Nearby Notes :: General :: Read nearby residue annotations around the center of rotation</ChimeraXClassifier>
     <ChimeraXClassifier>Command :: resnotes :: General :: Open the Residue Notes tool</ChimeraXClassifier>
@@ -25,6 +38,7 @@
     <ChimeraXClassifier>Command :: resnotes refresh :: General :: Refresh the Residue Notes tool state</ChimeraXClassifier>
   </Classifiers>
   <ExtraFiles package="chimerax.residue_notes">
+    <ExtraFile source="license.txt">license.txt</ExtraFile>
     <ExtraFile source="docs/user/tools/residue_notes.html">docs/user/tools/residue_notes.html</ExtraFile>
   </ExtraFiles>
 </BundleInfo>

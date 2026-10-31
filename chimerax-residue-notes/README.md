@@ -1,5 +1,13 @@
 # ChimeraX Residue Notes
 
+Version 0.2.6. Maintainer: Oliver Clarke <olibclarke@gmail.com>.
+Licensed under the [MIT license](license.txt).
+
+Requires Python 3.10 or newer and declares ChimeraX 1.11 or newer as the
+intended compatibility floor. The native GUI has been tested on macOS with
+ChimeraX 1.12.dev202603110023; stable 1.11 and Windows/Linux are not yet tested.
+No separate Gemmi installation is needed to use the bundle.
+
 ChimeraX bundle for reading, browsing, editing, and exporting the custom
 `_cootnote_residue_note.*` mmCIF annotations used by `coot_trimmings`.
 
@@ -13,13 +21,17 @@ The bundle currently provides two tools:
 
 ## Current behavior
 
+Navigation preserves the current center-of-rotation mode and pivot indicator
+settings. For example, `cofron` remains in effect after clicking a residue,
+region, or positional note, or using Previous/Next.
+
 The main `Residue Notes` tool:
 
 - follows a single selected residue when there is one
 - otherwise falls back to the residue closest to the current center of rotation
 - stores an optional short `title` per note
 - supports title-only region labels for motifs or domains
-- navigates to region notes and temporarily highlights their atoms and ribbons
+- navigates to region notes and selects their residues without changing structure colours
 - shows notes as collapsible cards rather than one plain text block
 - remembers the author for the current ChimeraX session
 - can export either:
@@ -105,12 +117,13 @@ restores the previous left-mouse binding. No note is added until the note editor
 is submitted.
 
 Click the region thread in either notes pane, or use Previous/Next in the editor,
-to centre and highlight the entire range. Its centre is recomputed from the
-current atoms rather than stored as a stale Cartesian point. Existing near/far
-clipping planes follow the range so an old slab cannot hide the new target.
-The highlight is removed when you navigate to another thread, refresh, change
-models, or close the tool. Atom and ribbon colours are restored unless you have
-deliberately recoloured them while the highlight was active.
+to centre and select the entire range. Its centre is recomputed from the
+current atoms rather than stored as a stale Cartesian point. Navigation never
+changes atom/ribbon colours or visibility; the native selection outline identifies
+the range. A symmetric, camera-aligned clipping slab is centred on the range,
+at least 10 A deep and extending at least 10 A beyond its atoms in depth.
+Stale scene-fixed front/back clips are replaced by this near/far slab so they
+cannot hide the new target.
 
 In Coot's annotation browser, **Add region note...** offers two-click picking
 or an entered chain/range. Region navigation uses the user-coloured CA view on
@@ -126,7 +139,8 @@ the view. It is not changed to the view centre. Only the title, author, and text
 are editable; editing a note does not relocate its point.
 
 Click a positional thread, or navigate with Previous/Next, to centre it and show
-a temporary cyan sphere. The current orientation and zoom are retained. The
+a temporary cyan sphere. The current orientation and zoom are retained, with a
+symmetric 10 A clipping slab centred on the point (equivalent to `symclip 5`). The
 marker is a non-pickable drawing, not a model atom, and is cleared when switching
 threads/models, refreshing, or closing the tool. Nearby Notes includes positional
 threads by their distance from the CoFR; clicking one navigates to that point.
@@ -182,35 +196,18 @@ Important details:
 - Markdown export writes one row per note with `Target`, `Title`, `Author`, `Timestamp`, and `Note`.
 - If a note has no explicit title, the UI falls back to the first line of the note text for previews.
 
-## Developer Checks
-
-Run offline tests from this bundle directory with Python and Gemmi installed:
-
-```sh
-python3 -B -m unittest test_positions test_regions -v
-```
-
-The Coot interoperability test is optional. To include it, set
-`COOT_TRIMMINGS_SCRIPT` to the path of `coot_trimmings.py`; it does not launch
-Coot. Gemmi is a test dependency, not a runtime dependency of this bundle.
-
-For the isolated native GUI and annotated-export check on macOS:
-
-```sh
-python3 -B tools/run_positions_gui_check.py --report /tmp/resnotes-gui.log
-```
-
-The GUI check uses the repository's example model and separate preferences.
-Use `--chimerax /path/to/ChimeraX` for a non-default executable.
-
 ## Status
+
+Tool Shed release preparation and remaining checks are documented in
+[SUBMISSION.md](SUBMISSION.md). An annotated-mmCIF or Markdown export is required
+to preserve new notes. ChimeraX session saving does not preserve these tool notes.
 
 This is still a lightweight working bundle rather than a polished general-release tool, but it is now substantially beyond the original prototype:
 
 - editable note threads
 - nearby read-only note browsing
 - optional note titles
-- single-chain region notes with temporary navigation highlights
+- single-chain region notes with selection-only navigation and padded symmetric clipping
 - positional notes at the current CoFR with temporary point markers
 - stronger mmCIF residue identifiers
 - plain-text UTF-8 note storage
